@@ -1,0 +1,717 @@
+/* PaperMod theme by Aditya Telange (MIT License), scoped to .lilian-post */
+
+.lilian-post {
+  --gap: var(--post-gap);
+  --content-gap: 28px;   /* > one line of leading, so paragraphs separate */
+  --primary: var(--ink);
+  --secondary: var(--text-muted);
+  --tertiary: rgb(214, 214, 214);
+  --content: var(--text);
+  --code-bg: var(--fog-light);
+  --border: var(--border-soft, rgb(238, 238, 238));
+  --accent: #44546a;
+  --accent-hover: #2b3646;
+  --radius: 8px;
+
+  /* Reading measure and the two layout tokens the post grid is built from.
+     --measure is the prose column; --rail is the sticky table-of-contents
+     column at wide viewports. Figures and tables stay inside --measure. */
+  --measure: var(--post-measure);
+  --rail: var(--post-rail);
+  --rail-gap: var(--post-rail-gap);
+
+  max-width: var(--measure);
+  margin: 0 auto;
+  /* Vertical padding only: the page shell owns the side margins. */
+  padding: var(--gap) 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  font-size: 17px;
+  line-height: 1.72;
+  color: var(--content);
+  word-break: break-word;
+  /* No panel: post pages set their own white background on .paper-page, so the
+     article sits directly on the page the way the figures' white canvases do.
+     A card here would frame the text and leave every figure as a visible
+     rectangle if the page behind it were ever tinted. */
+  background: none;
+}
+
+.lilian-post h1,
+.lilian-post h2,
+.lilian-post h3,
+.lilian-post h4,
+.lilian-post h5,
+.lilian-post h6 {
+  color: var(--primary);
+  line-height: 1.2;
+  margin-top: 0;
+  margin-bottom: 0;
+  font-family: inherit;
+  font-weight: 700;
+}
+
+/* ── Post header ─────────────────────────────────────────── */
+.lilian-post .post-header {
+  margin: 24px auto var(--content-gap);
+}
+
+.lilian-post .post-title {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--primary);
+  margin-bottom: 2px;
+}
+
+.lilian-post .post-meta {
+  color: var(--secondary);
+  font-size: 14px;
+  margin: 8px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lilian-post .post-links {
+  margin: 20px 0 30px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Borderless ghost buttons with a soft fill on hover, matching the home page
+   social links. Icon + label inherit currentColor (the slate accent). */
+.lilian-post .post-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  text-decoration: none;
+  box-shadow: none;
+  transition: color 0.18s ease, background-color 0.18s ease;
+}
+
+.lilian-post .post-links a:hover {
+  color: var(--accent-hover);
+  background: rgba(68, 84, 106, 0.1);
+  text-decoration: none;
+}
+
+.lilian-post .post-links a::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  flex: none;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
+}
+
+.lilian-post .post-links a.paper::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14%202H6a2%202%200%200%200-2%202v16a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2V8z%22%2F%3E%3Cpolyline%20points%3D%2214%202%2014%208%2020%208%22%2F%3E%3Cline%20x1%3D%2216%22%20y1%3D%2213%22%20x2%3D%228%22%20y2%3D%2213%22%2F%3E%3Cline%20x1%3D%2216%22%20y1%3D%2217%22%20x2%3D%228%22%20y2%3D%2217%22%2F%3E%3Cpolyline%20points%3D%2210%209%209%209%208%209%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14%202H6a2%202%200%200%200-2%202v16a2%202%200%200%200%202%202h12a2%202%200%200%200%202-2V8z%22%2F%3E%3Cpolyline%20points%3D%2214%202%2014%208%2020%208%22%2F%3E%3Cline%20x1%3D%2216%22%20y1%3D%2213%22%20x2%3D%228%22%20y2%3D%2213%22%2F%3E%3Cline%20x1%3D%2216%22%20y1%3D%2217%22%20x2%3D%228%22%20y2%3D%2217%22%2F%3E%3Cpolyline%20points%3D%2210%209%209%209%208%209%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.lilian-post .post-links a.code::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%2216%2018%2022%2012%2016%206%22%2F%3E%3Cpolyline%20points%3D%228%206%202%2012%208%2018%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%2216%2018%2022%2012%2016%206%22%2F%3E%3Cpolyline%20points%3D%228%206%202%2012%208%2018%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.lilian-post .post-links a.poster::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%222%22%20ry%3D%222%22%2F%3E%3Ccircle%20cx%3D%228.5%22%20cy%3D%228.5%22%20r%3D%221.5%22%2F%3E%3Cpolyline%20points%3D%2221%2015%2016%2010%205%2021%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%222%22%20ry%3D%222%22%2F%3E%3Ccircle%20cx%3D%228.5%22%20cy%3D%228.5%22%20r%3D%221.5%22%2F%3E%3Cpolyline%20points%3D%2221%2015%2016%2010%205%2021%22%2F%3E%3C%2Fsvg%3E");
+}
+
+/* ── Post content ────────────────────────────────────────── */
+.lilian-post .post-content {
+  color: var(--content);
+  counter-reset: figure-counter clip-counter;
+}
+
+/* Offset so a heading jumped to from the TOC isn't flush against the top. */
+.lilian-post .post-content :is(h1, h2, h3, h4) {
+  scroll-margin-top: 1.5rem;
+}
+
+.lilian-post .post-content h1 {
+  margin: 3.2rem 0 0.8rem;
+  font-size: 30px;
+}
+
+.lilian-post .post-content h2 {
+  margin: 3rem 0 0.7rem;
+  font-size: 25px;
+}
+
+.lilian-post .post-content h3 {
+  margin: 2.2rem 0 0.5rem;
+  font-size: 19px;
+}
+
+.lilian-post .post-content h4 {
+  margin: 24px 0 16px;
+  font-size: 16px;
+}
+
+.lilian-post .post-content p,
+.lilian-post .post-content figure,
+.lilian-post .post-content ul,
+.lilian-post .post-content ol {
+  margin-bottom: var(--content-gap);
+}
+
+.lilian-post .post-content a {
+  color: inherit;
+  text-decoration: none;
+  box-shadow: 0 1px 0 var(--primary);
+}
+
+.lilian-post .post-content a:hover {
+  color: var(--secondary);
+}
+
+.lilian-post .post-content ul,
+.lilian-post .post-content ol {
+  padding-inline-start: 20px;
+}
+
+.lilian-post .post-content li {
+  margin-top: 5px;
+}
+
+.lilian-post .post-content li p {
+  margin-bottom: 0;
+}
+
+.lilian-post .post-content strong {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.lilian-post .post-content em {
+  font-style: italic;
+}
+
+/* Blockquote */
+.lilian-post .post-content blockquote {
+  margin: 20px 0;
+  padding: 0 14px;
+  border-inline-start: 3px solid var(--primary);
+}
+
+/* HR */
+.lilian-post .post-content hr {
+  margin: 30px 0;
+  height: 2px;
+  background: var(--tertiary);
+  border: 0;
+}
+
+/* Code */
+.lilian-post .post-content code {
+  margin: auto 4px;
+  padding: 4px 6px;
+  font-size: .78em;
+  line-height: 1.5;
+  background: var(--code-bg);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.lilian-post .post-content pre {
+  margin: 10px auto;
+  background: rgb(28, 29, 33);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  padding: 10px;
+}
+
+.lilian-post .post-content pre code {
+  background: none;
+  color: #d5d5d6;
+  padding: 0;
+  font-size: 14px;
+  display: block;
+}
+
+/* Tables — clean "booktabs" paper table: rules only at top, under the header,
+   and bottom; no interior per-row lines (rows read by whitespace alone). */
+.lilian-post .post-content table {
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto 32px;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 14.5px;
+  font-variant-numeric: tabular-nums;
+  border-top: 2px solid var(--secondary);
+  border-bottom: 2px solid var(--secondary);
+}
+
+.lilian-post .post-content table th,
+.lilian-post .post-content table td {
+  padding: 6px 14px;
+  line-height: 1.3;
+  text-align: left;
+  vertical-align: baseline;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  hyphens: none;
+}
+
+.lilian-post .post-content table thead th {
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+  border-bottom: 1.5px solid var(--secondary);
+}
+
+/* Group sub-header rows (e.g. model names): row's first cell is italic, the rest
+   empty. Render as a small uppercase divider with breathing room above. */
+.lilian-post .post-content table tbody tr:has(td:first-child em) td {
+  padding-top: 15px;
+  border: none;
+}
+.lilian-post .post-content table tbody tr:has(td:first-child em) em {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+
+/* Long group labels must not inflate the first column: zero the cell's
+   width contribution and let the label paint across the empty row. */
+.lilian-post .post-content table tbody tr:has(td:first-child em) td:first-child {
+  width: 0;
+  max-width: 0;
+  overflow: visible;
+}
+
+/* Highlight the emphasised (bolded) row with a faint cardinal tint, mixed
+   against the page so it works on paper and on ink. */
+.lilian-post .post-content table tbody tr:has(strong) td {
+  background: color-mix(in srgb, var(--cardinal) var(--row-tint, 7%), transparent);
+}
+
+/* Figures — CSS counter auto-numbers them */
+.lilian-post .post-content figure {
+  counter-increment: figure-counter;
+  text-align: center;
+  /* Figures get more air than a paragraph: they are their own unit. */
+  margin: 2.4rem 0 2.6rem;
+}
+
+/* The standalone-image margin would otherwise double the figure's own. */
+.lilian-post .post-content figure img {
+  margin: 0;
+}
+
+.lilian-post .post-content figure img {
+  max-width: 100%;
+  display: block;
+  margin: 0 auto;
+  border-radius: 4px;
+}
+
+.lilian-post .post-content figcaption {
+  display: block;
+  text-align: left;
+  text-wrap: pretty;
+  width: 100%;
+  margin: 12px 0 0;
+  line-height: 1.45;
+  color: var(--secondary);
+  font-size: 15px;
+}
+
+.lilian-post .post-content figcaption::before {
+  content: "Figure " counter(figure-counter) ": ";
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+/* Standalone images */
+.lilian-post .post-content img {
+  border-radius: 4px;
+  margin: 1rem 0;
+  max-width: 100%;
+}
+
+/* Video figures — numbered "Clip N" on a counter separate from figures */
+.lilian-post .post-content figure.video-figure {
+  counter-increment: clip-counter;
+}
+
+.lilian-post .post-content figure.video-figure video {
+  display: block;
+  width: 100%;
+  margin: 0 auto;
+  border-radius: 4px;
+  background: #000;
+}
+
+.lilian-post .post-content figure.video-figure figcaption::before {
+  content: "Clip " counter(clip-counter) ": ";
+}
+
+/* Two videos sharing one figure/caption */
+.lilian-post .post-content .video-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .lilian-post .post-content .video-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* TOC */
+.lilian-post .toc {
+  margin: 0 2px 40px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  border-radius: var(--radius);
+  padding: .4em;
+  font-size: 15px;
+}
+
+.lilian-post .toc details summary {
+  cursor: pointer;
+  margin-inline-start: 20px;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+}
+
+.lilian-post .toc .inner {
+  margin: 0 20px;
+  padding: 10px 20px;
+}
+
+.lilian-post .toc a {
+  color: var(--primary);
+  text-decoration: none;
+  box-shadow: 0 1px 0 var(--primary);
+}
+
+.lilian-post .toc a:hover {
+  color: var(--secondary);
+}
+
+.lilian-post .toc ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Dense content must scroll inside itself, not widen the page. Without this a
+   five-column table or a long KaTeX display sets a min-content width on the
+   flex column above it, which stretches the whole shell — the site header ends
+   up pushed off-screen on narrow viewports. */
+.lilian-post,
+.lilian-post .post-content {
+  min-width: 0;
+}
+
+/* Tables size to their own content and centre on the prose column, capped at
+   the column width; anything wider scrolls inside itself rather than widening
+   the page. */
+.lilian-post .post-content table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lilian-post .post-content .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 2px;
+}
+
+/* Figures and tables stay inside the prose column: one left and right edge for
+   the whole article. A table wider than the column scrolls inside itself
+   rather than breaking the alignment. */
+.lilian-post .post-content > figure {
+  width: 100%;
+  max-width: 100%;
+  margin-inline: 0;
+}
+
+/* Figures render at the size they were designed at (matplotlib's figsize
+   survives into the SVG as a pt width) and only shrink when that exceeds the
+   column. Stretching every figure to the column made small single-panel plots
+   look oversized. */
+.lilian-post .post-content > figure img {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+/* Opt-out for figures whose designed size overstates them: a schematic of five
+   boxes carries far less per pixel than a plot of the same width, so it reads
+   as oversized when both fill the column. Caps only — never upscales, and on a
+   narrow screen the column is still the binding constraint. */
+.lilian-post .post-content > figure.figure-sm img {
+  max-width: min(100%, 456px);
+}
+
+.lilian-post .toc li {
+  margin: 5px 0;
+}
+
+/* Wide screens: rail and prose become one centred two-column grid rather than a
+   fixed element parked in the left margin. The article is the grid; the TOC is
+   placed in column 1 and sticks while column 2 scrolls, so the composition stays
+   symmetric instead of pushing the text right of centre. Below 1400px the TOC
+   falls back to the inline box above the post. */
+@media (min-width: 1400px) {
+  .lilian-post {
+    max-width: calc(var(--rail) + var(--rail-gap) + var(--measure));
+  }
+
+  /* The article body is the grid: rail in column 1, prose in column 2. The TOC
+     is a child of .post-content, so the grid lives there rather than on
+     .lilian-post. */
+  .lilian-post .post-content {
+    display: grid;
+    grid-template-columns: var(--rail) minmax(0, var(--measure));
+    column-gap: var(--rail-gap);
+    align-items: start;
+  }
+
+  .lilian-post .post-content > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  /* In grid, an item with `margin-inline: auto` shrink-wraps and centres.
+     PaperMod's headings carry `margin: 28px auto 20px`, which silently centred
+     every heading once .post-content became a grid. */
+  .lilian-post .post-content > :is(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote) {
+    margin-inline: 0;
+  }
+
+  /* The header sits above the grid, so indent it to line up with the prose. */
+  .lilian-post .post-header {
+    padding-inline-start: calc(var(--rail) + var(--rail-gap));
+  }
+
+  /* Spanning every row gives the sticky rail a full-height containing block;
+     without the span it would only stick within its own row. */
+  .lilian-post .post-content > .toc {
+    grid-column: 1;
+    grid-row: 1 / span 500;
+    position: sticky;
+    top: 5rem;
+    align-self: start;
+    max-height: calc(100vh - 7rem);
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    font-size: 13.5px;
+  }
+
+  .lilian-post .toc details summary {
+    margin-inline-start: 0;
+    margin-bottom: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--secondary);
+  }
+
+  .lilian-post .toc .inner {
+    margin: 0;
+    padding: 0;
+  }
+
+  .lilian-post .toc ul {
+    padding-inline-start: 0;
+  }
+
+  .lilian-post .toc li {
+    margin: 0;
+    line-height: 1.3;
+  }
+
+  /* Block links stacked so their left borders form one continuous rule;
+     the active section's segment turns accent (scroll-spy indicator). */
+  .lilian-post .toc a {
+    display: block;
+    padding: 6px 0 6px 14px;
+    border-inline-start: 2px solid var(--border);
+    color: var(--secondary);
+    box-shadow: none;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .lilian-post .toc a:hover {
+    color: var(--primary);
+    box-shadow: none;
+  }
+
+  .lilian-post .toc a.is-active {
+    color: var(--primary);
+    font-weight: 600;
+    border-inline-start-color: var(--accent);
+  }
+}
+
+/* References list */
+.lilian-post .post-content ol.references {
+  list-style: decimal;
+  padding-inline-start: 20px;
+}
+
+.lilian-post .post-content ol.references li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+  font-size: 15px;
+}
+
+/* KaTeX stays at body size */
+.lilian-post .katex {
+  font-size: 1em;
+}
+
+/* Display math: centered block */
+.lilian-post .katex-display {
+  display: flex !important;
+  justify-content: center;
+  margin: 1.25em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ── Callout boxes (intuition / key result / watch out) ─────── */
+.lilian-post .post-content .callout {
+  /* Each variant sets --callout-accent; the border, the label and the tint are
+     all derived from it, so a theme only has to restate the accent and the tint
+     strength instead of four hardcoded background colours. */
+  --callout-accent: var(--accent);
+  --callout-tint: 6%;
+  margin: 22px 0;
+  padding: 14px 18px 14px 16px;
+  border-inline-start: 3px solid var(--callout-accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--callout-accent) var(--callout-tint), transparent);
+  font-size: 15.5px;
+  line-height: 1.55;
+}
+
+.lilian-post .post-content .callout > :first-child {
+  margin-top: 0;
+}
+
+.lilian-post .post-content .callout > :last-child {
+  margin-bottom: 0;
+}
+
+.lilian-post .post-content .callout .callout-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--callout-accent);
+}
+
+/* Key result — cardinal accent, for the load-bearing claim of a post or of a
+   section: the thesis stated up front, and the numbers that settle it. */
+.lilian-post .post-content .callout-key {
+  --callout-accent: #8c1515;
+}
+
+/* Intuition — slate, softer. Reads the shared token so this and the index's
+   hover states cannot drift into two different blues. */
+.lilian-post .post-content .callout-intuition {
+  --callout-accent: var(--slate);
+}
+
+/* Watch out — amber, for pitfalls */
+.lilian-post .post-content .callout-warn {
+  --callout-accent: #a6790a;
+}
+
+/* Recipe / defaults — monospace-flavored take-home box */
+.lilian-post .post-content .callout-recipe {
+  --callout-accent: #2f6f4f;
+}
+
+/* ── Collapsible derivations ───────────────────────────────── */
+.lilian-post .post-content details.derivation {
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  padding: 0 16px;
+}
+
+.lilian-post .post-content details.derivation[open] {
+  padding-bottom: 8px;
+}
+
+.lilian-post .post-content details.derivation summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+}
+
+.lilian-post .post-content details.derivation summary::-webkit-details-marker {
+  display: none;
+}
+
+.lilian-post .post-content details.derivation summary::before {
+  content: "▸ ";
+  color: var(--secondary);
+}
+
+.lilian-post .post-content details.derivation[open] summary::before {
+  content: "▾ ";
+}
+
+/* Table captions — small, muted, left-aligned under the table */
+.lilian-post .post-content p.table-caption {
+  margin: -18px auto 32px;
+  width: 90%;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #888;
+  text-wrap: pretty;
+}
+
+/* ── Notation table — tighter, left-aligned reference ──────── */
+.lilian-post .post-content table.notation {
+  font-size: 14.5px;
+  margin-bottom: 28px;
+}
+.lilian-post .post-content table.notation td:first-child {
+  white-space: nowrap;
+  font-variant-numeric: normal;
+}

@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Python bytecode (in case any tooling lands here)
+__pycache__/
+*.pyc
+
+# Node / Vite build
+node_modules/
+dist/
+*.local
+
+# Local notes / drafts (not for the site)
+to_add.md
+SCR-*.png
+
+# Vite cache
+.vite/

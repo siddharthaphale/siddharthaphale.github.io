@@ -1,0 +1,697 @@
+import '../styles/lilian-post.css'
+
+<div className="lilian-post">
+
+<div className="post-header">
+  <h1 className="post-title">The best curriculum for your easy tasks is the worst for your hard ones</h1>
+  <div className="post-meta">Siddharth Aphale · Ayushman Singh · Preprint · Stanford CS224R, 2026 · 34 min read</div>
+</div>
+
+<div className="post-content">
+
+> **TL;DR.** Sparse-reward RL often fails at the *reset distribution*, before optimization even matters, and the usual fix quietly breaks when different contexts learn at different rates.
+>
+> - **Why it fails:** rollouts from the real start rarely reach the grasps and bottlenecks that carry signal, so the reset distribution, not the optimizer, is the binding constraint.
+> - **Why the usual fix breaks:** reverse curricula supply easier starts but withdraw them on one *global* schedule. A pace fast enough for the easy contexts abandons the hard ones.
+> - **SCOUT:** one scaffold frontier per context, moved by binary success alone (advance, retreat, antistall), reward and optimizer untouched. Roughly triples worst-group performance under conflict.
+> - **Granularity is the real question:** pace at the scale where progress differs. Group labels that track the split beat SCOUT on the natural conflict; a split hidden *inside* a label sends pooled pacing to zero, where label-free per-context pacing still works.
+> - **Not only a constructed conflict:** two unmodified Meta-World tasks reproduce the failure, and the ladder needs no hand labels: fixed quantiles of one reference trajectory, or of the policy's own successes, retain the benefit.
+
+<div className="toc">
+<details open>
+<summary>Table of Contents</summary>
+<div className="inner">
+
+- [Sparse-reward RL fails before optimization does](#sparse-reward-rl-fails-before-optimization-does)
+- [Scaffold cells and per-context frontiers](#scaffold-cells-and-per-context-frontiers)
+- [What scaffolds buy: access, across six settings](#what-scaffolds-buy-access-across-six-settings)
+- [When one schedule can't win](#when-one-schedule-cant-win)
+- [Where SCOUT sits among curricula](#where-scout-sits-among-curricula)
+- [The conflict shows up on unmodified tasks](#the-conflict-shows-up-on-unmodified-tasks)
+- [How fine does pacing have to be?](#how-fine-does-pacing-have-to-be)
+- [Scaffolds without hand labels](#scaffolds-without-hand-labels)
+- [What actually carries the win](#what-actually-carries-the-win)
+- [Stronger learners, longer horizons](#stronger-learners-longer-horizons)
+- [What we can't claim yet](#what-we-cant-claim-yet)
+- [Takeaways](#takeaways)
+
+</div>
+</details>
+</div>
+
+## Sparse-reward RL fails before optimization does
+
+Sparse-reward RL has a failure mode that has nothing to do with the optimizer. When reward
+arrives only after a successful grasp, a narrow-passage traversal, or a precise placement,
+rollouts from the real start distribution almost never visit the states that carry a learning
+signal. Hindsight Experience Replay [[1]](https://arxiv.org/abs/1707.01495) can re-describe
+what an agent achieved, but it cannot manufacture the contact or near-goal states the policy
+never reaches. So the reset distribution, *where episodes begin*, can decide whether learning
+starts at all.
+
+Meta-World shelf-place makes the failure concrete. From the target start ($\ell{=}0$) a sparse
+reward pays out only if the object reaches the shelf, and an untrained arm never produces that
+outcome, so nothing in the rollout distinguishes a good attempt from a bad one. From an assisted
+start ($\ell{>}0$) that begins the episode already grasped and partway to the goal, the informative
+states are present from the first step. Scaffolds exist to manufacture that second kind of
+experience; the open problem is deciding when to take it away.
+
+Start-state, or reverse, curricula answer this by beginning episodes near informative states and
+expanding back toward the true start as competence improves
+[[2]](https://arxiv.org/abs/1707.05300)[[3]](https://arxiv.org/abs/1705.06366). But a scaffold
+solves only half the problem. The paper factors the curriculum into two decisions: **scaffold
+access**, obtaining informative reset states at all, and **scaffold allocation**, deciding which
+contexts lose that assistance, and when. Almost everyone answers allocation with one global
+schedule: a single assistance-removal timetable shared by the whole training distribution. That is
+reasonable when every context learns at the same rate, and brittle the moment they don't.
+
+<div className="callout callout-key">
+<span className="callout-label">The claim</span>
+
+Building the easy version of a task is the easy half. The hard half is pacing the *removal* of assistance, per context. A schedule fast enough for the tasks that are nearly solved abandons the tasks that still need help; a schedule slow enough for the hard tasks parks the easy ones at assisted levels they have outgrown. The best global curriculum for your easy tasks is the worst for your hard ones.
+
+</div>
+
+---
+
+## Scaffold cells and per-context frontiers
+
+Let $\mathcal{X}$ be a bank of training contexts and let $\ell \in \{0, \ldots, L\}$ index scaffold
+levels. A reset operator $G(x, \ell)$ maps a context and level to an initial-state distribution;
+$\ell{=}0$ is the unassisted target used for evaluation, and larger $\ell$ give *more* assistance
+(resets nearer the goal). Call a pair $(x, \ell)$ a **scaffold cell**.
+
+SCOUT keeps one active **frontier** $f_x$ per context, initialized to the easiest level $L$.
+Training samples the active cells $(x, f_x)$; evaluation is always on *disjoint held-out contexts*
+at $\ell{=}0$. The entire method is the rule that moves $f_x$. From an exponential moving average of
+binary rollout success $s_x$ (with $\beta{=}0.2$), each context, once it has enough evidence
+($\geq 15$ rollouts) and its cooldown has expired, updates its frontier:
+
+$$
+f_x \leftarrow
+\begin{cases}
+\max(0,\, f_x - 1), & s_x \ge \tau_{\text{high}} & \text{(advance)}\\[2pt]
+\min(L,\, f_x + 1), & s_x \le \tau_{\text{low}} & \text{(retreat)}\\[2pt]
+\max(0,\, f_x - 1), & \text{stale} \ \wedge\ s_x > \tau_{\text{low}} & \text{(antistall)}\\[2pt]
+f_x, & \text{otherwise}
+\end{cases}
+$$
+
+with $\tau_{\text{low}}{=}0.15$ and $\tau_{\text{high}}{=}0.8$. High success removes assistance;
+low success restores it. The third case is the **antistall** step, and it fixes a real gap: a plain
+threshold controller has a dead band $(\tau_{\text{low}}, \tau_{\text{high}})$ in which a context can
+sit forever, neither failing enough to retreat nor succeeding enough to advance.
+
+<div className="callout callout-intuition">
+<span className="callout-label">Intuition</span>
+
+A two-threshold controller is a *stability* device, and stability is exactly the failure mode here: a
+context sitting at $s_x{=}0.5$ is neither in trouble nor making progress, and it will happily stay
+there for the whole run collecting reward it has already learned to collect.
+
+Antistall makes the loop willing to be wrong. After a few eligible updates with no move, it forces
+one harder step; if that was premature, the ordinary failure transition restores the assistance on
+the next update. The asymmetry is what makes it safe: advancing costs one wasted evaluation window,
+whereas stalling costs the rest of training.
+
+</div>
+
+<figure>
+  <img src="/blog/assets/scout/fig1_method.svg" alt="SCOUT controls a per-context scaffold frontier: context bank grid, learner, and success controller loop" />
+  <figcaption>SCOUT as per-context frontier control. Rows are contexts, columns training-only scaffold levels ($\ell{=}0$ is the target start). SCOUT trains from the active cell $(x, f_x)$ and moves each frontier on binary success alone. Evaluation is always held-out at $\ell{=}0$.</figcaption>
+</figure>
+
+Concretely, a level on the in-air FetchPickAndPlace ladder restores a synthesized grasp with the
+object already partway to its in-air goal; larger $\ell$ resets nearer the goal, and $\ell{=}0$ is
+the unassisted task used for evaluation.
+
+Two things to notice. First, SCOUT is deliberately **minimal**: it chooses reset cells and touches
+nothing else. Reward, optimizer, and update rule are unchanged, so the same controller sits over
+SAC+HER [[4]](https://arxiv.org/abs/1801.01290), SAC, or PPO. Second, it consumes only **binary
+success**: no critic values, uncertainty, gradients, or demonstrations. That makes the curriculum
+inspectable (you can read a context's frontier trajectory directly) and, as we'll see, is not the
+part that costs you performance.
+
+One caveat is baked into the design: more assistance need not transfer monotonically to the target.
+A heavily assisted start can omit behavior that $\ell{=}0$ evaluation requires: starting already
+grasped skips learning the approach. That is exactly why the controller must *remove* assistance,
+and why evaluation is only ever at $\ell{=}0$ on held-out contexts.
+
+---
+
+## What scaffolds buy: access, across six settings
+
+It helps to split two effects that curriculum results usually blur together. The first is
+**access**: does having easier starts help sparse-reward learning at all? Across six natural
+settings (geodesic reset progress in PointMaze, route and stage progress in MiniGrid
+[[5]](https://arxiv.org/abs/2306.13831), and reverse-curriculum starts in Fetch and Meta-World
+[[6]](https://arxiv.org/abs/1910.10897)), scaffolded training beats target-start training on held-out
+AUC, with every paired seed difference positive. The gains come in two flavors: *exploration
+unlocks*, where target-start training simply never gets off the ground, and *sample-efficiency*
+gains, where the baseline eventually learns but slowly.
+
+| Setting | Regime | Target-start | SCOUT |
+|:---|:---:|---:|---:|
+| In-air FetchPickAndPlace | unlock | 0.00 | 1.00 |
+| MiniGrid MultiRoom | unlock | 0.00 | 1.00 |
+| Meta-World PickPlace | unlock | 0.02 | 0.73 |
+| MiniGrid DoorKey | unlock | 3/6 seeds | 6/6 seeds |
+| PointMaze Large | efficiency | 0.19 | 0.30 |
+| PointMaze Medium | efficiency | 0.62 (AUC 0.25) | 0.63 (AUC 0.56) |
+
+Final numbers hide which of the two flavors each setting is. The curves separate them: an unlock
+never leaves the floor without scaffolds, while an efficiency gain is the same climb, started later.
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/scout/fig_sixtask.svg" alt="Held-out target-start learning curves across six natural settings for target-start, global annealing, and SCOUT" />
+  <figcaption>Held-out target-start success across the six natural settings (mean ± s.d.; per-panel step ranges). Target start (gray), global annealing (orange), SCOUT (blue). DoorKey's window closes before slow seeds solve, so final success and solved-seed counts are its primary metrics.</figcaption>
+</figure>
+
+The qualifier matters: this is evidence for *scaffolded experience*, not for SCOUT specifically.
+Random scaffold sampling and global annealing also benefit from easier starts here. In fact, on
+homogeneous tasks a well-tuned global schedule is often indistinguishable from SCOUT: nearly tied
+on PointMaze Medium, close on MultiRoom, and global annealing actually *leads* on Meta-World
+PickPlace (0.298 vs 0.240 AUC), while SCOUT edges ahead on PointMaze Large (0.245 vs 0.230)
+and on the brittle DoorKey, where global annealing stalls. If your contexts learn at similar rates,
+you may not need per-context anything. Which is the whole point of the next section.
+
+---
+
+## When one schedule can't win
+
+To isolate **allocation**, whether pacing each context independently beats a global schedule, you
+need contexts that demand incompatible pacing. The paper constructs one: a PickAndPlace bank of easy
+*on-table* contexts and hard long-range *in-air* contexts, with the middle difficulty deliberately
+removed. The easy group wants assistance gone quickly so it can practice the full approach-and-place;
+the hard group needs grasped, goal-proximal starts far longer.
+
+No single global schedule serves both. SCOUT sidesteps the compromise: separate frontiers advance
+the on-table contexts toward $\ell{=}0$ while holding the in-air contexts at assisted resets until
+they can progress. It reaches near-perfect final success on both groups; global annealing and the
+synchronized reverse curriculum solve only the easy group (figure below, panels 1–3). The headline metric is **worst-group
+AUC**, the lower of a seed's two group AUCs, so you cannot win by acing one group and dropping the
+other:
+
+| Method | Worst-group AUC |
+|:---|---:|
+| **SCOUT** | **0.354** |
+| Strongest fixed scaffold | 0.123 |
+| Asynchronous global mixture | 0.022 |
+
+Per seed, and split by group, the same comparison looks like this.
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/scout/fig_conflict_results.svg" alt="Measured pacing conflicts: worst-group AUC, final success by group, SCOUT's per-group frontiers, and the Meta-World conflict panel" />
+  <figcaption>The measured pacing conflicts. <strong>Panels 1–3</strong> (constructed conflict): worst-group AUC per seed; final success by group, where global schedules abandon the in-air group; and SCOUT's mean scaffold level per group. <strong>Panel 4</strong> previews the unmodified Meta-World conflict, which the section after next sets up.</figcaption>
+</figure>
+
+<div className="callout callout-key">
+<span className="callout-label">Key result</span>
+
+Nearly 3× the strongest fixed scaffold on worst-group AUC, with the paired difference positive
+in all six runs (exact two-sided sign test, $p{=}0.031$, replicated in a second six-seed block).
+
+The metric is doing real work here. Report the *mean* and every global schedule in this table looks
+respectable, because the easy group is at ceiling. The worst-group minimum is what makes an abandoned
+group impossible to average away.
+
+</div>
+
+The most informative
+baseline is that asynchronous global mixture, one time-varying distribution over levels, keeping
+several available at once but with no per-context frontiers. It reaches only 0.022, *below* even a
+fixed compromise level. Sampling multiple scaffold levels is not enough; the hard contexts need those
+levels *targeted to them*.
+
+On a held-out in-air context at the same seed and budget, the difference is qualitative rather than
+marginal: global annealing, having removed assistance on the easy group's schedule, never learns to
+pick the object up at all, while SCOUT lifts it to the in-air goal and holds it.
+
+The conflict is also not an optimization artifact; it is an **expressivity gap**, and it shows up in a
+two-line counting argument. Take two contexts $a, b$ and two levels $\{\text{assisted}, \text{target}\}$,
+each with the same budget of $K{+}1$ episodes. Suppose $a$ succeeds iff it gets exactly one assisted
+episode (then $K$ of target practice), and $b$ succeeds iff it gets $K$ assisted episodes (then one
+of target).
+
+> **Proposition (informal).** A synchronized global schedule gives both contexts the same number of assisted episodes $n_1$. But $a$ needs $n_1{=}1$ and $b$ needs $n_1{=}K$, and for $K>1$ no single $n_1$ satisfies both. A per-context schedule assigns each what it needs, under the same per-context budget.
+
+<details className="derivation">
+<summary>Full argument: the counting, and what it does not cover</summary>
+
+A synchronized global schedule is a map $\sigma: \{1, \ldots, K{+}1\} \to \{\text{assisted}, \text{target}\}$
+from episode index to level, applied identically to every context. The number of assisted episodes any
+context receives is therefore a property of the schedule alone:
+
+$$
+n_1(\sigma) = \big|\{\, t : \sigma(t) = \text{assisted} \,\}\big|, \qquad \text{the same for } a \text{ and } b.
+$$
+
+By construction $a$ succeeds iff $n_1 = 1$ and $b$ succeeds iff $n_1 = K$. Both hold only if $1 = K$,
+so for $K > 1$ every global $\sigma$ fails at least one context, and the failure is not a matter of
+degree: the sacrificed context gets zero. A per-context assignment $n_1(a){=}1$, $n_1(b){=}K$ satisfies
+both while spending the same $K{+}1$ episodes per context, so the gap is not a budget difference.
+
+The argument is deliberately about **expressivity**, so note its two limits. It says nothing about
+optimization or generalization across levels; and it constrains only schedules that impose one level
+*sequence* on everything. A population-level curriculum that keeps several levels live at once escapes
+the counting, which is why the asynchronous mixture is in the experiments rather than dismissed on
+paper. It fails empirically anyway, so what the hard contexts need is not level availability but level
+*targeting*.
+
+</details>
+
+---
+
+## Where SCOUT sits among curricula
+
+The comparisons from here on run against a shelf of named alternatives, so it is worth placing them
+before they start appearing in tables. Two axes separate the recent curriculum-for-sparse-reward
+work, and they are also the two axes on which SCOUT is unusual.
+
+The first axis is *where the easier intermediate states come from*. Some methods hand-build reverse
+curricula outward from the goal [[2]](https://arxiv.org/abs/1707.05300); GoalGAN generates goals near
+the learner's frontier [[3]](https://arxiv.org/abs/1705.06366); DISCOVER
+[[7]](https://arxiv.org/abs/2505.19850) and ACDC [[8]](https://arxiv.org/abs/2603.02104) automate
+curricula for sparse-reward goal reaching and manipulation; capability-aware goal sampling tracks
+progress along demonstrations, and large-scale reset diversity enables multiphase manipulation.
+SCOUT's trajectory-derived variant ([later](#scaffolds-without-hand-labels)) sits at the cheap end of this axis: one reference trajectory per
+context (scripted, or the policy's own), used only to place fixed-quantile reset states,
+synthesizing no goals and building no state archive.
+
+The second axis, and the one that actually distinguishes SCOUT, is *what is fixed before training
+versus what reacts to competence*. Prior methods commit to a schedule up front: a demonstration-anchored
+reverse-then-forward curriculum [[9]](https://arxiv.org/abs/2405.03379), a plan over task dimensions
+[[8]](https://arxiv.org/abs/2603.02104), or a shared distribution over levels. SCOUT fixes only the
+reset states and makes the *pacing itself* reactive and per-context, from binary rollout success,
+with no imitation objective.
+
+---
+
+## The conflict shows up on unmodified tasks
+
+A fair objection to the constructed conflict: that bank was *built* to break global schedules, with
+the middle difficulty removed on purpose. So the paper went hunting for the same failure in the
+wild, screening natural context splits (DoorKey geometry splits, several Meta-World task pairs) at
+exploratory budgets. Most splits don't conflict: either both groups are target-start solvable given
+enough budget, or both face the same front-loaded exploration wall so one curriculum serves both, or
+the hard task is unlearnable even with help. One pair is different: **push** paired with
+**shelf-place**, two unmodified Meta-World tasks in one bank (groups $=$ tasks), same frozen
+controller, same five-level reverse-curriculum ladder, SAC+HER, six seeds.
+
+Shelf-place is the pair's hard half: unlearnable from the target start, yet reachable from grasped
+starts. Push is its easy half: on-surface, target-start solvable, and merely *tolerant* of
+assistance, which is exactly what lets a global schedule's aggregate numbers look fine while it
+abandons the other task.
+
+<div className="callout callout-key">
+<span className="callout-label">Key result</span>
+
+Global annealing acquires a transient partial competence on shelf-place while assisted starts remain
+(peaking at 0.44), then collapses to **exactly 0.000 at every subsequent evaluation on every
+seed**, at 6000- and 9000-iteration budgets alike. SCOUT holds shelf-place at
+0.52–0.68 and wins the paired worst-group comparison on six of six seeds ($p{=}0.031$),
+replicated across two software stacks.
+
+Two unmodified benchmark tasks in one bank, no constructed difficulty gap: a permanent allocation
+failure, not slowness.
+
+</div>
+
+| Condition | Worst AUC | Push final | Shelf final | Worst final |
+|:---|---:|---:|---:|---:|
+| Group frontier (oracle labels) | **0.256** | 0.840 | **0.757** | **0.720** |
+| **SCOUT** | 0.141 | 0.743 | 0.617 | 0.613 |
+| RFCL-style local frontier | 0.164 | 0.743 | 0.373 | 0.367 |
+| ALP cells | 0.140 | 0.823 | 0.477 | 0.477 |
+| Asynchronous global mixture | 0.125 | 0.757 | 0.383 | 0.383 |
+| Random scaffold | 0.117 | 0.803 | 0.477 | 0.477 |
+| PLR cells | 0.118 | 0.683 | 0.197 | 0.197 |
+| ACED-style advance (no retreat) | 0.049 | 0.777 | 0.313 | 0.313 |
+| RFCL advance rule (no retreat) | 0.042 | 0.763 | 0.167 | 0.123 |
+| Fixed mid scaffold | 0.022 | 0.753 | 0.053 | 0.053 |
+| Global annealing | 0.003 | 0.843 | 0.000 | 0.000 |
+| Target start | 0.000 | 0.880 | 0.000 | 0.000 |
+
+Two rows deserve to be read before the rest. The **group frontier** runs SCOUT's own rule once per
+oracle task label rather than once per context, and it beats SCOUT outright, on all six seeds. That
+is the honest shape of the result; the [next section](#how-fine-does-pacing-have-to-be) is about
+why. The
+**advance-only rules**, which reproduce RFCL's and ACED's pacing mechanisms without the retreat
+step, land near the bottom: on a ladder this coarse, a controller that can only ever remove
+assistance walks the hard task off a cliff it cannot climb back up.
+
+The rest of the table splits in two, with the cell-level teachers straddling the line (ALP behaves like the coverage methods below, PLR closer to the deterministic ones). Every *deterministic* level selector (global annealing, the
+strongest fixed level, target-start training) sacrifices shelf-place completely while its push group
+stays high, which is why the failure is invisible to aggregate success: the average looks healthy
+while the worst group is at zero. The *coverage* methods (random sampling, the asynchronous mixture)
+survive on average, tying SCOUT on worst-group AUC, but with far wider per-seed finals (mixture
+0.38 ± 0.24, sometimes missing the lift chain entirely; random 0.48 ± 0.19; SCOUT
+0.61 ± 0.06). Locality buys not just the mean but the tail.
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/scout/fig_mw_conflict.svg" alt="Meta-World push x shelf-place conflict: shelf-place success curves, worst-group AUC by condition, and per-group scaffold frontiers" />
+  <figcaption>The Meta-World push × shelf-place conflict (six seeds). <strong>Left:</strong> shelf-place success; annealing collapses after a transient blip. <strong>Center:</strong> worst-group AUC by condition. <strong>Right:</strong> SCOUT's mean scaffold level per task group.</figcaption>
+</figure>
+
+Two robustness blocks bound the mechanism. Extending to 9000 iterations changes nothing: annealing
+still ends at 0.000 on the lift task on every seed, with the same transient rise and permanent
+collapse. But on a *nine-level* ladder at the same long horizon the conflict dissolves entirely, all
+three controllers solving both tasks, while SCOUT's endpoint barely moves. A deterministic global
+schedule fails exactly when the ladder is too coarse for one pace to serve both groups. Per-context
+allocation is, among other things, **robustness to how well you built the scaffold axis**, with one
+caveat about the shape of this conflict that we return to [at the end](#what-we-cant-claim-yet).
+
+---
+
+## How fine does pacing have to be?
+
+Both conflicts so far line up with labels you already have: on-table versus in-air, push versus
+shelf-place. If the split is known, why pace every context separately rather than pooling each
+group and running one frontier per group? This is the question the paper now puts at the center,
+and it reframes the whole contribution: a reset curriculum is a **granularity-matching** problem.
+Assistance should be paced at whatever scale learning progress actually differs, and per-context
+pacing is the setting that needs no advance knowledge of what that scale is.
+
+The test is a **group frontier**: SCOUT's exact rule, run once per oracle group instead of once per
+context. It is not a handicapped baseline. It sees labels SCOUT never gets, and because it pools
+rollouts it clears the evidence gate about $|\text{group}|\times$ faster. Where the labels track the
+real split, that extra evidence is decisive:
+
+- **Constructed conflict.** SCOUT stays ahead on sample efficiency (median worst-group AUC 0.378
+  vs 0.229 on the replication block, paired Δ +0.18 [0.04, 0.29]), but both reach the
+  endpoint (0.97 vs 0.95 worst-group final). The advantage is speed, not outcome.
+- **Meta-World conflict.** The group frontier simply **wins**: better on all six seeds
+  (Δ +0.10 [0.03, 0.22] worst-group AUC) and the best worst-group final of any condition
+  (0.72 against SCOUT's 0.61).
+
+So when labels track the heterogeneity, pooling is the better tool, and the paper says so. That
+concession is what makes the next experiment load-bearing.
+
+### When the split hides inside a label
+
+The **within-group conflict** takes a PickAndPlace bank in which every context carries the same
+nominal label, in-air, but goal height is secretly bimodal. No method is told the band exists.
+Because the low band dominates the pooled statistics, a pooled frontier reaches its advance
+threshold while the high-band contexts are nowhere near ready, and pulls their assistance out from
+under them.
+
+| Condition | Worst-band AUC | Worst-band final | Δ vs SCOUT | SCOUT wins |
+|:---|---:|:---:|:---|:---:|
+| **SCOUT** | **0.701** | 0.91 ± 0.10 | (ref.) | n/a |
+| PLR cells | 0.615 | 0.92 ± 0.14 | +0.08 [0.05, 0.18] | 6/6 |
+| ACED-style advance | 0.553 | 0.95 ± 0.07 | +0.16 [0.11, 0.27] | 6/6 |
+| ALP cells | 0.551 | 0.85 ± 0.20 | +0.14 [0.06, 0.25] | 6/6 |
+| Global annealing | 0.527 | $\mathbf{0.96 \pm 0.06}$ | +0.20 [0.09, 0.27] | 6/6 |
+| Asynchronous global mixture | 0.451 | 0.83 ± 0.18 | +0.29 [0.17, 0.39] | 6/6 |
+| RFCL advance rule | 0.396 | 0.93 ± 0.08 | +0.30 [0.17, 0.48] | 6/6 |
+| Pooled frontier (oracle) | 0.000 | 0.22 ± 0.35 | +0.69 [0.47, 0.74] | 6/6 |
+
+Brackets are paired seed-bootstrap 95% confidence intervals on the median paired difference
+(10,000 resamples).
+
+<div className="callout callout-warn">
+<span className="callout-label">Watch out</span>
+
+The pooled frontier, the same mechanism that won on Meta-World, collapses to a median worst-band AUC
+of exactly 0.000, ending four of six seeds with zero high-band success. Its label was true; it just
+wasn't the label that *mattered*.
+
+This is the asymmetry that decides the design. Pacing too finely costs sample efficiency, a few
+tenths of AUC. Pacing on the wrong grouping costs the hidden subpopulation entirely, and because your
+labels say those contexts are fine, nothing in your aggregate metrics will tell you.
+
+</div>
+
+Every label-free rule eventually gets the high band to
+0.83–0.96 final, so this is not a claim that only SCOUT can solve it, but SCOUT is more
+sample-efficient and more reliable than all seven alternatives on all six seeds.
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/scout/fig_granularity.svg" alt="Pacing granularity across three conflicts: SCOUT leads the constructed conflict, the group frontier leads Meta-World, and only the pooled frontier fails on the within-group band" />
+  <figcaption>Pacing granularity must match where heterogeneity lives (per-seed dots, median ticks; worst-group AUC, worst-group final, worst-band AUC). SCOUT leads the constructed conflict, the group frontier leads Meta-World, and only the pooled frontier fails outright on the hidden band.</figcaption>
+</figure>
+
+The cell-level teachers are worth a separate note, because they are the obvious alternative to a
+frontier. PLR- and ALP-style samplers prioritize among all $(x, \ell)$ cells without maintaining a
+per-context frontier at all, and they fail or run unstable on the hard group in *both* conflicts.
+Prioritizing cells is not the same as allocating assistance: a sampler can keep visiting the hard
+cells and still never decide that a particular context should stop having help withdrawn.
+
+The rule that comes out of this section is narrower than "per-context always wins," and more
+useful. Pace at the granularity where progress differs. If you have labels you trust to track it,
+pool by them. If you don't know where the heterogeneity lives, or suspect it lives inside your
+labels, per-context pacing is the only tested setting that is safe in both regimes.
+
+---
+
+## Scaffolds without hand labels
+
+So far the scaffold axis used task-specific semantics: "key acquired," "object grasped," geodesic
+progress. A fair objection: maybe the win is really in those hand-designed labels. It is not.
+Replace the hand-built axis with a task-independent extractor: take one successful reference
+trajectory per context, and serialize the simulator state at five fixed progress quantiles
+($\{0, 0.25, 0.5, 0.75, 0.9\}$). Same quantiles across tasks; only the per-environment state codec
+differs. Those states become the scaffold levels, and the controller is unchanged.
+
+| Setting | Target-start AUC | Manual SCOUT | Automatic SCOUT | $R_{\text{retain}}$ | CI |
+|:---|---:|---:|---:|---:|:---:|
+| PointMaze Large | 0.012 | 0.225 | 0.269 | 1.21 | [1.05, 1.44] |
+| MiniGrid DoorKey | 0.259 | 0.451 | 0.541 | 1.47 | unstable |
+| In-air FetchPickAndPlace | 0.002 | 0.801 | 0.845 | 1.06 | [1.05, 1.06] |
+
+$R_{\text{retain}}$ is the fraction of the hand-built scaffold's gain over target-start training that
+the trajectory-derived scaffold recovers; $\geq 1$ means it matches or exceeds the hand-built axis
+(DoorKey's seed bootstrap is unstable, so only the point estimate is reported).
+All three do, with a 0% invalid-reset rate, including Fetch, whose grasped, lifted configurations
+must survive simulator stabilization (the trick is restoring the actuator controls that *hold* the
+grasp, or the object drops within a few steps). DoorKey is the striking case: fixed quantiles recover
+the key → door → goal progression with no event labels at all. And the conflict result survives the
+swap: automatic SCOUT reaches 0.73 worst-group AUC versus 0.55 for automatic global annealing,
+beating every baseline in all six paired seeds ($p{=}0.031$). On this gentler trajectory-derived
+ladder the global baselines do eventually solve both groups, so the preserved gap is sample
+efficiency rather than outright abandonment, consistent with the ladder-coarseness finding above.
+This is construction *given* reference solutions and reset access, not discovery from scratch, but
+it removes the manual stage-labeling step, which was the portability worry.
+
+### Scaffolds from the policy's own rollouts
+
+The reference trajectory does not have to be scripted. The most autonomous source is the policy's
+*own* first target-start success per context: after a scaffolded training run, roll the trained
+policy from each training context's target start, keep the shortest success, and feed it through
+the same fixed-quantile extractor. The self-generated ladder retains the hand-built benefit on all
+three settings. DoorKey is essentially fully self-generated (0.5% fallback) and its self ladder
+slightly beats the scripted one ($R_{\text{self}}{=}1.76$ against $R_{\text{retain}}{=}1.47$).
+PointMaze Large marks the limit (65% of ladders fall back to the scripted reference, because the
+policy solves only about a third of contexts even after scaffolded training).
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/scout/fig_self_conflict.svg" alt="Self-generated scaffolds on the constructed conflict: worst-group AUC by condition" />
+  <figcaption>Self-generated scaffolds on the constructed conflict (worst-group AUC, six seeds). The self ladder clears the mixture, the fixed level, and the manual reference (6/6 seeds, $p{=}0.031$) but only <em>ties</em> automatic annealing (0.64 vs 0.60): gentler policy-derived states let a global schedule catch up.</figcaption>
+</figure>
+
+The strongest version regenerates the ladder *during* training: every 200 iterations, reharvest
+the policy's $\ell{=}0$ successes and overwrite each solved context's scaffold axis in place. On
+DoorKey the policy-generated share of the axis reaches 1.0 by iteration 1200 (by mid-training
+the scaffold is *entirely* the policy's own trajectories), and this costs nothing: it matches or
+exceeds the fixed axis it replaced on five of six seeds (median held-out success 0.97 vs 0.83,
+$p{=}0.031$). The ladder can be continually rederived from the policy's evolving competence rather
+than imposed once at the start.
+
+---
+
+## What actually carries the win
+
+Which part of SCOUT matters? The paper runs the ablation a skeptic would ask for: keep the
+per-context trajectory frontier but strip SCOUT's machinery, sampling contexts uniformly and
+disabling antistall, an RFCL-style controller [[9]](https://arxiv.org/abs/2405.03379). It matches
+SCOUT on the homogeneous settings and separates from global and random schedules under the
+constructed conflict exactly as SCOUT does: over eight paired seeds the two are statistically
+indistinguishable (worst-group AUC 0.77 vs 0.75, sign test $p{=}1.0$).
+
+So the honest attribution: the **local per-context frontier** is what carries the conflict
+advantage, not the calibrated sampling or the antistall step. The Meta-World conflict refines that
+attribution rather than reversing it. On its coarser hand-built ladder the bare frontier again ties
+SCOUT on worst-group AUC, but its worst-group *final* is the widest of any condition
+(0.37 ± 0.28, per-seed values from 0.04 to 0.74, against SCOUT's 0.61 ± 0.06). On coarse
+ladders, antistall and success-calibrated sampling don't move the mean; they **remove the failure
+tail**. Antistall also earns its keep on the dead-band failure it was designed for: disabling it
+drops median worst-group AUC to 0.15, from an enabled range of 0.20 to 0.49.
+
+The same conclusion survives a harder test: rebuilding the *external* rules component by component
+on SCOUT's own infrastructure, so the only difference is the pacing mechanism. RFCL's advance-only
+rule ties SCOUT on the gentler constructed ladder (0.98 vs 0.97 worst-group final) and then
+collapses to 0.12 on the coarse Meta-World ladder, where SCOUT reaches 0.61. ACED-style advance
+is worse on both conflicts, losing every one of six paired seeds each time. Both eventually solve
+the hidden within-group band, just more slowly. The pattern is consistent: what a rule needs on a
+coarse ladder is the ability to **give assistance back**, because a single premature advance on a
+five-rung ladder is a step the hard contexts cannot recover from on their own.
+
+A seven-rule sweep over transition and sampling rules on the same frontier separates nothing upward
+from the shared local-frontier cluster. Two details survive it: forgetting is load-bearing (an
+*undiscounted* Beta posterior falls below every discounted variant, so what a rule must survive is
+non-stationarity, not estimation noise), and *anticipation actively hurts*, because extrapolating
+competence ahead advances contexts onto levels they cannot yet learn. Any sufficiently stable rule
+realizes the advantage; the minimalism was not a compromise.
+
+<details className="derivation">
+<summary>The seven rules, and what separated them</summary>
+
+The sweep covers Wilson-bound gating over discounted counts, a discounted Beta posterior, an
+ALP-GMM-style learning-progress sampler, and a drift-aware Bayesian gate tuned by noise-aware
+Bayesian optimization over 54 runs. Evidence-gated rules halve frontier churn at equal worst-group
+performance. The drift-aware gate's optimum is its own no-anticipation corner. Critic-uncertainty
+variants, when tried, gave no robust improvement over success-only control.
+
+</details>
+
+---
+
+## Stronger learners, longer horizons
+
+If the local frontier is what carries the win, the next question is when it stops being needed at
+all: a strong enough learner, or a long enough horizon, could change the answer. Three boundary
+studies scope it.
+
+**Against the official RFCL.** The RFCL-style ablation above shares SCOUT's infrastructure; the
+paper also runs the *official* RFCL implementation [[9]](https://arxiv.org/abs/2405.03379) on the
+PointMaze Large bank under an aligned protocol (same bank, one hundred state-only demonstrations
+for RFCL, sparse reward, held-out evaluation). Official RFCL matches SCOUT's endpoint (median
+held-out success 0.31 vs 0.34) and gets there faster (held-out AUC 0.34 vs 0.20), but the
+early efficiency traces to its ensemble critic trained at a high update-to-data ratio
+[[10]](https://proceedings.mlr.press/v202/ball23a.html), not the curriculum: either curriculum clears a floor that
+target-start SAC+HER cannot (0.00). SCOUT reaches the shared endpoint with a plain single-critic
+learner and no demonstrations.
+
+**Against a modern goal-conditioned learner.** Because the controller is policy-agnostic, you can
+cross it with contrastive RL [[11]](https://arxiv.org/abs/2206.07568) and ask whether a stronger
+base learner removes the need for reset curricula. The answer is two-sided. On PointMaze Large,
+contrastive RL from the target start reaches 0.48 final, clearing both the SAC+HER floor
+(0.11) and SCOUT over SAC+HER (0.31), and adding the reset curriculum mildly *interferes*
+(0.41, below CRL alone on all three seeds). The maze's apparent ceiling was a base-learner limit,
+and a strong directed learner dissolves the access problem outright. On in-air Fetch the picture
+inverts: contrastive RL barely lifts the floor (0.20), SCOUT helps it on all three seeds
+(0.24), and the TD learner with scaffolded starts dominates everything (SCOUT+SAC+HER at
+1.00). Where reset access truly binds, as in contact-rich manipulation, allocation adds value to
+modern and classic learners alike.
+
+**Longer horizons.** On DoorKey-16×16, the same key → door → goal structure at
+2.3× the solution horizon, the no-scaffold baselines break: target-start training solves
+0/3 seeds, global annealing rescues 1/3, and both the manual and trajectory-derived scaffolds
+keep all three seeds solving (final 0.68 and 0.72). The longer horizon *restores* a
+local-over-global gap that on 8×8 was only a tie in eventual final success.
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/scout/fig_dk16_access.svg" alt="DoorKey 16x16 long-horizon access: automatic SCOUT solves all seeds while global annealing mostly fails" />
+  <figcaption>Long-horizon access on DoorKey-16×16 (mean ± s.d., three seeds). Automatic SCOUT rises and holds on every seed; global annealing mostly fails; target start never learns at all.</figcaption>
+</figure>
+
+Two further boundaries. Level count has a sweet spot at longer horizons: nine levels lift final
+success by ≈0.10 over the default five at no AUC cost, while thirteen dwell too long per
+level and lose AUC. And stretching *continuous* control exposes a base-learner boundary rather than a
+curriculum one: a 1.4×-horizon PointMaze defeats plain SAC+HER under every condition, scaffold
+included, yet strengthening only the learner (critic LayerNorm plus a higher update-to-data ratio
+[[10]](https://proceedings.mlr.press/v202/ball23a.html)) reopens the scaffold gap (0.26 vs 0.04 global annealing
+and 0.01 target start). The curriculum was never the bottleneck there.
+
+---
+
+## What we can't claim yet
+
+The strongest local-versus-global result still rests on a *constructed* conflict. The screening
+search over natural splits now has a clearer answer than "we didn't find one": it surfaced exactly
+one robust natural conflict, the push × shelf-place pair, and that conflict is **one-sided**.
+A no-compromise conflict needs *two-sided opposition*: a group actively harmed by sustained
+assistance alongside a group that requires it, so that no single level distribution serves both. In
+the natural pair, push merely tolerates assistance, so coverage methods (random, the asynchronous
+mixture) survive on average where deterministic schedules fail outright; only the constructed bank
+defeats every global alternative including the mixture.
+
+Per-context pacing is also not free of a rival. Where reliable labels track the heterogeneity, one
+pooled frontier per group is the better instrument, and on the natural Meta-World conflict it beats
+SCOUT on every seed. The case for going label-free is not that per-context always wins; it is that
+you often cannot tell in advance whether your labels are the ones that matter, and the failure mode
+when they aren't is total (a pooled frontier ending four of six seeds at zero on the band it could
+not see).
+
+The boundary studies scope the claim from both sides. A strong directed learner can dissolve the
+*access* problem on navigation (contrastive RL beats every curriculum condition on PointMaze
+Large). Strong cross-level generalization can substitute for *allocation* against the mixture: in
+MiniGrid, restored scaffold states are on-path states of the target task, so population-level mixed
+exposure trains $\ell{=}0$ directly. The conflict regime is chain-dependent tasks with weak
+cross-level transfer, which is exactly what both conflict settings are. And everything here needs
+reset access: without instrumented resets, as on physical robots, the method does not apply.
+
+That is the right way to read SCOUT: not a universal replacement for global curricula, but
+**protection against pacing heterogeneity**, plus robustness to a coarse scaffold axis. When your
+contexts are homogeneous and your ladder is fine-grained, a good global schedule ties it. When they
+are not, and you cannot always tell in advance, a per-context frontier keeps a global schedule from
+quietly abandoning the tasks that need help the most.
+
+---
+
+## Takeaways
+
+- Access is broad but not unique to SCOUT; a strong global schedule ties it on homogeneous tasks.
+  *Allocation* is decisive under incompatible pacing, where per-context frontiers roughly triple
+  worst-group performance.
+- The conflict is not a lab artifact: two unmodified Meta-World tasks reproduce it, with every
+  deterministic schedule permanently sacrificing shelf-place while aggregate success looks fine.
+  Finer ladders dissolve that conflict, so per-context pacing doubles as insurance against a coarse
+  scaffold axis.
+- The sharper question is *granularity*, not locality. Pace at the scale where progress differs:
+  with trustworthy group labels, a pooled per-group frontier is better and beats SCOUT on the
+  natural conflict; with the split hidden inside a label, pooling ends at zero on the band it cannot
+  see while label-free per-context pacing handles both regimes. Cell-level teachers (PLR, ALP) and
+  advance-only rules (RFCL, ACED) handle neither well. Going label-free costs nothing on the ladder
+  either: fixed progress quantiles of one reference trajectory, or of the policy's own successes,
+  recover or beat the hand-built axis.
+- Credit goes to the local frontier itself, not to any clever score: seven transition and sampling
+  rules land in the same cluster, forgetting is the one load-bearing ingredient, and anticipating
+  competence actively hurts. On coarse ladders, SCOUT's extra machinery removes the failure tail.
+- Boundaries are real: a strong directed learner can dissolve access on navigation, long horizons
+  restore the local advantage, and the flagship two-sided conflict is still constructed. The claim
+  stays deliberately conditional.
+
+<div className="callout callout-recipe">
+<span className="callout-label">The recipe</span>
+
+1. **Build the ladder cheaply.** One reference trajectory per context, scripted or the policy's own
+   first target-start success, sliced at fixed progress quantiles $\{0, 0.25, 0.5, 0.75, 0.9\}$. No
+   stage labels. Verify resets are physically valid (for grasps, restore the actuator controls that
+   *hold* the object, or it drops within a few steps).
+2. **Prefer a slightly finer ladder at long horizons.** Nine rungs beat five on long-horizon DoorKey
+   at no AUC cost; thirteen dwell too long per rung. A coarse ladder is what makes advance-only rules
+   dangerous.
+3. **Run one frontier per context, initialized at the easiest level.** Advance at
+   $s_x \ge 0.8$, retreat at $s_x \le 0.15$, on an EMA of binary success ($\beta{=}0.2$) behind an
+   evidence gate ($\geq 15$ rollouts) and a cooldown. Keep the retreat: it is what a coarse ladder
+   needs most.
+4. **Discount, don't anticipate.** Forgetting is the one load-bearing ingredient across seven
+   transition rules; extrapolating competence forward actively hurts.
+5. **Evaluate only at $\ell{=}0$ on held-out contexts, and report the worst group.** Assisted-start
+   scores measure the scaffold, not the policy, and aggregate success is exactly the statistic that
+   hides an abandoned group.
+
+</div>
+
+---
+
+## References
+
+<ol className="references">
+  <li>Andrychowicz et al. <a href="https://arxiv.org/abs/1707.01495" target="_blank" rel="noreferrer">"Hindsight Experience Replay."</a> <em>NeurIPS</em>, 2017.</li>
+  <li>Florensa et al. <a href="https://arxiv.org/abs/1707.05300" target="_blank" rel="noreferrer">"Reverse Curriculum Generation for Reinforcement Learning."</a> <em>CoRL</em>, 2017.</li>
+  <li>Florensa et al. <a href="https://arxiv.org/abs/1705.06366" target="_blank" rel="noreferrer">"Automatic Goal Generation for Reinforcement Learning Agents."</a> <em>GoalGAN (ICML)</em>, 2018.</li>
+  <li>Haarnoja et al. <a href="https://arxiv.org/abs/1801.01290" target="_blank" rel="noreferrer">"Soft Actor-Critic."</a> <em>ICML</em>, 2018.</li>
+  <li>Chevalier-Boisvert et al. <a href="https://arxiv.org/abs/2306.13831" target="_blank" rel="noreferrer">"Minigrid &amp; Miniworld: Modular RL Environments for Goal-Oriented Tasks."</a> <em>NeurIPS</em>, 2023.</li>
+  <li>Yu et al. <a href="https://arxiv.org/abs/1910.10897" target="_blank" rel="noreferrer">"Meta-World: A Benchmark for Multi-Task and Meta RL."</a> <em>CoRL</em>, 2020.</li>
+  <li>Diaz-Bone et al. <a href="https://arxiv.org/abs/2505.19850" target="_blank" rel="noreferrer">"DISCOVER: Automated Curricula for Sparse-Reward Reinforcement Learning."</a> 2025.</li>
+  <li>Wang et al. <a href="https://arxiv.org/abs/2603.02104" target="_blank" rel="noreferrer">"ACDC: Adaptive Curriculum Planning with Dynamic Contrastive Control for Goal-Conditioned RL in Robotic Manipulation."</a> 2026.</li>
+  <li>Tao et al. <a href="https://arxiv.org/abs/2405.03379" target="_blank" rel="noreferrer">"Reverse Forward Curriculum Learning."</a> <em>RFCL (ICLR)</em>, 2024.</li>
+  <li>Ball et al. <a href="https://proceedings.mlr.press/v202/ball23a.html" target="_blank" rel="noreferrer">"Efficient Online Reinforcement Learning with Offline Data."</a> <em>RLPD (ICML)</em>, 2023.</li>
+  <li>Eysenbach et al. <a href="https://arxiv.org/abs/2206.07568" target="_blank" rel="noreferrer">"Contrastive Learning as Goal-Conditioned Reinforcement Learning."</a> <em>NeurIPS</em>, 2022.</li>
+</ol>
+
+</div>
+
+</div>

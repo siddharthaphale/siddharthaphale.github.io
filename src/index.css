@@ -1,0 +1,179 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+@import 'katex/dist/katex.min.css';
+@import './styles/paper.css';
+
+* {
+  box-sizing: border-box;
+}
+
+/* Smooth-scroll when jumping to a Table of Contents anchor. */
+html {
+  scroll-behavior: smooth;
+}
+
+:root {
+  /* Palette: warm paper, ink, cardinal as the sole sparing accent */
+  --cardinal: #8c1515;
+  --cardinal-hover: #6f1010;
+  /* The one blue in the system. It marks things you can act on (a title or tag
+     under the cursor) and the "Intuition" callout, so cardinal is left to mean
+     "this is the important one" rather than "this is clickable". Desaturated
+     enough to sit on warm paper without going nautical. */
+  --slate: #35618f;
+  --ink: #211f1b;
+  --text: #3b382f;
+  --text-secondary: #56524a;
+  --text-muted: #8c877c;
+  --border: #e7e2d8;
+  --bg: #fcfbf8;
+  --fog-light: #f3f1ea;
+  --card-bg: #ffffff;
+  --card-border: #e7e2d8;
+
+  /* Post-page layout, one source of truth. The article grid and the page shell
+     are both sized from these, so header, back link, TOC rail and prose all
+     share one left and right edge. */
+  /* 704px ~= 79 characters. Chosen so --post-rail + --post-rail-gap +
+     --post-measure exactly fills the 1000px shell's content box. */
+  --post-measure: 704px;
+  --thumb-plate: #ffffff;
+  --post-rail: 176px;
+  --post-rail-gap: 3rem;
+  --post-gap: 24px;
+  --shell-pad: 2.25rem;
+
+  /* Space Mono for name + headings (Jayden vibe); Source Sans for readable body */
+  --serif: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  --sans: 'Source Sans 3', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.65;
+  font-weight: 400;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  color: var(--text);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  overflow-x: clip;
+}
+
+/* Reading pages sit on their own flat background — white in the light theme,
+   the page ink colour in the dark one — so figures have nothing to frame. */
+body:has(.paper-page) {
+  background: var(--page-reading);
+}
+
+/* ---------- Dark theme ----------
+   Only the tokens change; every rule downstream reads from them. The boot
+   script in index.html stamps data-theme on <html> before first paint. */
+:root {
+  --page-reading: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --cardinal: #e2807f;
+  --cardinal-hover: #f0a09f;
+  --slate: #7ea8d8;
+  --ink: #ecebe7;
+  --text: #d3d1cb;
+  --text-secondary: #a8a49b;
+  --text-muted: #837e74;
+  --border: #2d3139;
+  --bg: #14161a;
+  --fog-light: #1d2026;
+  --card-bg: #191c21;
+  --card-border: #2d3139;
+  --page-reading: #14161a;
+  /* Thumbnails keep a paper plate in both themes: a soft off-white in dark so
+     four bright tiles do not glare on the page. */
+  --thumb-plate: #f2f1ec;
+}
+
+/* Callout accents and the highlighted table row: the light-theme hues are too
+   dark to read as text on ink, and a 6% tint disappears against it. Restate the
+   accent lighter and the tint stronger; the shared rules derive the rest. */
+:root[data-theme='dark'] .lilian-post .post-content .callout {
+  --callout-tint: 15%;
+}
+
+:root[data-theme='dark'] .lilian-post .post-content .callout-key {
+  --callout-accent: #e2807f;
+}
+
+:root[data-theme='dark'] .lilian-post .post-content .callout-warn {
+  --callout-accent: #d9b25f;
+}
+
+:root[data-theme='dark'] .lilian-post .post-content .callout-recipe {
+  --callout-accent: #7fbf9b;
+}
+
+:root[data-theme='dark'] .lilian-post .post-content {
+  --row-tint: 14%;
+}
+
+/* Figures are transparent SVG (dark ink) or white-canvas PNG. Inverting turns
+   the ink light and the white canvas near-black, and the hue rotation puts the
+   series colours back where they started; transparent areas are untouched
+   because a filter cannot change alpha. */
+:root[data-theme='dark'] .lilian-post img {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+
+/* Figures whose panels are rendered scenes rather than plotted ink: inverting
+   them would invert the photography too. They keep their own white canvas, so
+   in dark mode they read as a lit plate — the same device as the paper
+   thumbnails — and their black labels stay legible against it. */
+:root[data-theme='dark'] .lilian-post .post-content figure.is-render img {
+  filter: none;
+}
+
+/* The headshot is a photograph — inverting it would be grotesque. */
+:root[data-theme='dark'] .bio-portrait img {
+  filter: none;
+}
+
+/* The email and GitHub marks are solid black artwork, so they disappear on a
+   dark page; the LinkedIn and Scholar marks carry their own colour and are
+   left alone. */
+:root[data-theme='dark'] .social-links a[href^='mailto'] .soc-ico,
+:root[data-theme='dark'] .social-links a[href*='github.com'] .soc-ico {
+  filter: invert(1);
+}
+
+#root {
+  width: 100%;
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  color: var(--cardinal);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--cardinal-hover);
+  text-decoration: underline;
+}
+
+/* Elysia brand purple */
+.elysia-link {
+  color: #654cff;
+}
+
+.elysia-link:hover {
+  color: #4f37d6;
+}

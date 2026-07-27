@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="author" content="Siddharth Aphale" />
+    <meta
+      name="description"
+      content="ML researcher with 6+ years applying probabilistic modeling to real-world engineering systems. Current research on post-training and reinforcement learning for LM-based and embodied agents."
+    />
+    <meta name="robots" content="all" />
+    <title>Siddharth Aphale</title>
+    <link rel="canonical" href="https://siddharthaphale.github.io/" />
+
+    <!-- Link previews. These are static, so every route shares the site-level
+         card: a single-page app serves one HTML shell, and crawlers do not run
+         the router. Per-post titles and images would need the build to emit a
+         prerendered HTML file per route. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Siddharth Aphale" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://siddharthaphale.github.io/" />
+    <meta property="og:title" content="Siddharth Aphale" />
+    <meta
+      property="og:description"
+      content="Data Scientist working on probabilistic ML for battery prognostics, and on post-training and test-time compute for LLMs and VLAs. Papers and long-form write-ups."
+    />
+    <meta
+      property="og:image"
+      content="https://siddharthaphale.github.io/assets/images/og-card.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Siddharth Aphale — Data Scientist, Probabilistic ML, Embodied AI"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Siddharth Aphale" />
+    <meta
+      name="twitter:description"
+      content="Probabilistic ML for battery prognostics; post-training and test-time compute for LLMs and VLAs."
+    />
+    <meta
+      name="twitter:image"
+      content="https://siddharthaphale.github.io/assets/images/og-card.png"
+    />
+    <script>
+      // Runs before first paint: a stored choice wins, otherwise follow the OS.
+      // Without this the page would paint light and then flip to dark.
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme')
+          var dark = stored
+            ? stored === 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (dark) document.documentElement.dataset.theme = 'dark'
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,445 @@
+import '../styles/lilian-post.css'
+
+<div className="lilian-post">
+
+<div className="post-header">
+  <h1 className="post-title">Offline to online RL: distribution shift, conservatism, and collapse</h1>
+  <div className="post-meta">Siddharth Aphale · May 30, 2026 · 19 min read</div>
+</div>
+
+<div className="post-content">
+
+> **TL;DR.** Offline-to-online RL is a distributionally non-stationary handoff, not offline RL followed by online RL, and the first online updates can wreck a policy that was working.
+>
+> - **The tension:** offline RL must distrust actions outside the dataset; online RL must eventually try them, so conservatism is both necessary and temporary, and the whole problem is deciding when to relax it.
+> - **How it breaks:** optimistic bootstrap collapse (the actor exploits critic errors on unsupported actions), miscalibrated pessimism that unlearns a good policy, actor-critic misalignment, replay shock, and excessive conservatism that preserves the policy while blocking any improvement.
+> - **What bridges it:** control the replay mixture, transfer the critic only after checking its scale and ranking, protect the actor with a growing trust region, and relax conservatism at the rate evidence, not wall-clock time, expands coverage. And check that pretraining beats a from-scratch learner on the same data at all.
+>
+> This post is a synthesis of published work rather than new experiments; every figure in it is schematic.
+
+<div className="toc">
+<details open>
+<summary>Table of Contents</summary>
+<div className="inner">
+
+- [The non-stationary bridge](#the-non-stationary-bridge)
+- [Shift does not vanish online](#shift-does-not-vanish-when-interaction-begins)
+- [Why offline RL is conservative](#why-offline-rl-is-conservative)
+- [How a good policy collapses](#how-a-good-policy-collapses-online)
+- [Design principles](#design-principles-for-a-stable-transition)
+- [When pretraining actually helps](#when-pretraining-actually-helps)
+- [What to measure](#what-an-empirical-study-should-measure)
+
+</div>
+</details>
+</div>
+
+## The non-stationary bridge
+
+Offline RL promises a clean deployment pattern: learn a competent policy from a
+fixed dataset, then improve it with a small online budget,
+
+$$
+\mathcal{D}_\text{off} \xrightarrow{\text{offline RL}} (\pi_0, Q_0) \xrightarrow{\text{online}} (\pi_1, Q_1), (\pi_2, Q_2), \ldots
+$$
+
+This looks easier than learning from scratch: the agent starts with a working policy
+and a critic trained on far more data than it could collect early online. Yet the
+first online updates can sharply reduce return. A useful offline policy gets
+overwritten, the critic diverges or changes scale, and the actor-critic loop drives
+the agent into states neither component understands.
+
+<div className="callout callout-key">
+<span className="callout-label">The central tension</span>
+
+Offline RL must distrust actions outside the dataset. Online RL must eventually try actions outside the dataset. Conservatism is therefore both necessary and temporary, and the whole problem is deciding when to relax it.
+
+</div>
+
+It helps to abstract the training distribution as a moving mixture of offline and
+online data,
+
+$$
+\mu_t(s,a) = (1-\eta_t)\,d_\text{off}(s,a) + \eta_t\,d_{\text{on},t}(s,a)
+$$
+
+where $\eta_t$ is the effective fraction of online data the optimizer sees. The point
+is simply that **the critic's training distribution changes throughout fine-tuning**.
+Final return is not enough to evaluate this: a policy that collapses for 100k steps
+then recovers may be unusable.
+
+<div className="callout callout-key">
+<span className="callout-label">What to report</span>
+
+$$
+\Delta_\text{collapse}(T) = J(\pi_0) - \min_{t \le T} J(\pi_t), \qquad
+\tau_\text{rec}(\varepsilon) = \min\{t : J(\pi_t) \ge J(\pi_0) - \varepsilon\}
+$$
+
+Collapse depth and recovery time are the two numbers that make the handoff legible, and both are
+defined *relative to the policy you already had*. Report final return alone and a method that spent
+100k steps below $J(\pi_0)$ is indistinguishable from one that never dipped, which is one reason
+comparisons in this literature can rank methods that behave very differently in deployment as
+equivalent.
+
+</div>
+
+<figure>
+  <img src="/blog/assets/offline-to-online-rl/fig1_collapse.svg" alt="Return versus online steps: naive fine-tuning collapses below the offline policy then slowly recovers, while a stable transition improves without a deep dip" />
+  <figcaption>The transition, not either phase, is the hard part. Naive online fine-tuning can drop far below the deployed offline policy $J(\pi_0)$ before recovering; the collapse depth Δ and recovery time $\tau_\text{rec}$ are exactly what a final-score comparison hides. A stable transition improves without the deep dip. Curves are illustrative.</figcaption>
+</figure>
+
+Three things move at once, on different clocks. The **replay distribution** $\mu_t$
+drifts as online data accumulates; the **critic** $Q_t$ chases a target that depends on
+the actor; and the **actor** $\pi_t$ chases the critic. Offline RL tuned all three
+against a *fixed* $\mu$. The moment $\mu$ starts moving, the guarantees that held on the
+dataset stop binding, and the three components can desynchronize faster than any one of
+them converges. That desynchronization, not the difficulty of either phase alone, is what
+breaks the handoff.
+
+The rest of this post argues that every workable bridge does the same two things: it ties
+conservatism to *local evidence* rather than to training phase, and it earns its keep against a
+from-scratch learner given the same data. Where a method fails, it is usually because it indexed
+conservatism to the calendar instead of to coverage.
+
+---
+
+## Shift does not vanish when interaction begins
+
+Offline RL is usually framed around *action* distribution shift: the policy proposes
+actions rare or absent in the data. Going online adds two more. Action errors compound
+into *state* shift (a small deviation changes the next state distribution, and later
+decisions happen at even less covered states), and adding online data creates *replay*
+shift (the critic is no longer solving the regression that produced $Q_0$).
+
+The bootstrapped target
+
+$$
+y_t = r + \gamma\,\mathbb{E}_{a' \sim \pi_t(\cdot \mid s')}\big[Q_{\bar\theta}(s', a')\big]
+$$
+
+is the trouble: the transition $(s,a,r,s')$ may be in the buffer while the target
+action $a'$ is not, so function approximation turns an unsupported prediction into a
+training target, and the actor then maximizes it. The role of coverage is precise.
+With a concentrability coefficient $C_t = \operatorname{ess\,sup}_{s,a} d^{\pi_t}(s,a)/\mu_t(s,a)$,
+
+$$
+\mathbb{E}_{d^{\pi_t}}[f^2] \le C_t\,\mathbb{E}_{\mu_t}[f^2]
+$$
+
+so small error on replay data only implies small on-policy error when $C_t$ is
+controlled; if the policy reaches regions with negligible replay probability, $C_t$
+blows up.
+
+<div className="callout callout-key">
+<span className="callout-label">The bound</span>
+
+$$
+\big\|\widehat{Q} - Q^{\pi_t}\big\|_{d^{\pi_t}} \;\le\; \sqrt{C_t}\;\big\|\widehat{Q} - \mathcal{T}^{\pi_t}\widehat{Q}\big\|_{\mu_t}
+$$
+
+The bound is standard [[1]](https://arxiv.org/abs/1905.00360); what matters here is how to read it.
+It is an amplifier, not a guarantee: the error *where the actor acts* is the residual
+*where the critic trained*, multiplied by $\sqrt{C_t}$. Every quantity you can monitor cheaply lives
+on the right-hand side; the one you care about lives on the left, and only coverage links them.
+
+</div>
+
+<details className="derivation">
+<summary>Full derivation: how a negligible residual becomes a fatal one</summary>
+
+Two steps, both standard, and it is worth seeing that neither of them requires the critic to be
+badly trained.
+
+**Step 1, change of measure.** For any function $f$, the concentrability definition gives
+$\mathbb{E}_{d^{\pi_t}}[f^2] \le C_t\,\mathbb{E}_{\mu_t}[f^2]$. Taking square roots and setting
+$f = \widehat{Q} - \mathcal{T}^{\pi_t}\widehat{Q}$ moves the residual from the distribution you
+trained on to the distribution you act on, at a cost of $\sqrt{C_t}$.
+
+**Step 2, bootstrap amplification.** A residual is not yet a value error. Under the sup norm,
+
+$$
+\big\|\widehat{Q} - Q^{\pi}\big\|_\infty \;\le\; \frac{1}{1-\gamma}\,\big\|\widehat{Q} - \mathcal{T}^{\pi}\widehat{Q}\big\|_\infty
+$$
+
+so the Bellman residual is further multiplied by the horizon factor $(1-\gamma)^{-1}$, 100× at
+$\gamma = 0.99$, because each backup feeds the next.
+
+**The arithmetic that matters.** Suppose the offline data covers the actor's occupancy well at first,
+$C_0 \approx 2$, and the critic's replay residual is a genuinely small 0.02. On-policy error is then
+about 0.03: invisible. Now let ten gradient steps push the policy into a corridor the dataset visited
+with probability $10^{-3}$, where $C_t$ can reach $\sim 10^3$. The same residual now bounds on-policy
+error at roughly 0.6: a 30× amplification from the coverage term alone, before the horizon
+factor. Nothing about the critic changed. The actor moved.
+
+</details>
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/offline-to-online-rl/fig2_concentrability.svg" alt="Worst-case on-policy error versus concentrability on a log scale: a fixed small replay residual is amplified by the square root of C, negligible in support but exceeding the return scale once the policy leaves support" />
+  <figcaption>Coverage sets the amplifier. On-policy error is bounded by $\sqrt{C_t}$ times the replay residual, so with a fixed residual the error stays negligible while the policy is well covered ($C_t \approx 2$) yet exceeds the return scale once the policy leaves support and $C_t$ blows up. Illustrative, with residual 0.02.</figcaption>
+</figure>
+
+<div className="callout callout-intuition">
+<span className="callout-label">Intuition</span>
+
+The amplifier would be survivable if the actor wandered into low-coverage regions at random. It does
+not: it is *drawn* there. A maximizing actor seeks the highest predicted value, and the highest
+predicted values are exactly where the critic is least constrained by data.
+
+So the failure is a positive feedback loop rather than an accident. Acting on an overestimate moves
+occupancy toward the overestimate, which raises $C_t$, which widens the error the actor is
+maximizing. Online distribution shift is self-reinforcing in a way offline shift is not.
+
+</div>
+
+---
+
+## Why offline RL is conservative
+
+Coverage is therefore the quantity offline RL has to defend, and it cannot defend it by acting.
+The fixed data setting breaks online RL's corrective loop: if the actor exploits an
+erroneous high value for an unsupported action, the offline learner cannot execute it
+and collect the evidence that it is bad. So offline methods encode conservatism, in
+three broad flavors.
+
+- **Policy / support conservatism** keeps the policy near the data, maximizing
+  $\mathbb{E}[Q] - \lambda\,D(\pi, \beta)$. BCQ [[2]](https://proceedings.mlr.press/v97/fujimoto19a.html) restricts candidate actions to a learned behavior model; TD3+BC [[3]](https://proceedings.neurips.cc/paper/2021/hash/a8166da05c5a094f7dc03724b41886e5-Abstract.html) adds a cloning term; AWAC [[4]](https://arxiv.org/abs/2006.09359) enforces the constraint implicitly through advantage-weighted regression toward the data.
+- **Value conservatism.** CQL [[5]](https://proceedings.neurips.cc/paper/2020/hash/0d2b2061826a5df3221116a5085a6052-Abstract.html) directly lowers values for actions sampled from a broad proposal relative to dataset actions, discouraging the actor from exploiting unsupported highs. Pessimistic ensembles use disagreement or a lower aggregate.
+- **In-sample conservatism.** IQL [[6]](https://openreview.net/forum?id=68n2s9ZJWF8) never queries arbitrary actions in its backup: it fits an expectile value from dataset actions and extracts a policy by advantage-weighted regression.
+
+All three share an assumption: *coverage is fixed, so unsupported actions should stay
+distrusted*. Online fine-tuning invalidates the second half: coverage can improve, but
+only after the agent acts, and the algorithm must decide when an action has earned
+enough evidence to stop being treated as out of distribution. How each method carries
+into the online phase is the real differentiator:
+
+| Method | Offline conservatism | Online transition | Limitation online |
+| --- | --- | --- | --- |
+| BCQ [[2]](https://proceedings.mlr.press/v97/fujimoto19a.html) | restrict actions to a behavior model | none by design | bounded by the behavior model's support |
+| TD3+BC [[3]](https://proceedings.neurips.cc/paper/2021/hash/a8166da05c5a094f7dc03724b41886e5-Abstract.html) | BC term added to the actor | shrink the BC weight | a fixed weight is not adaptive |
+| AWAC [[4]](https://arxiv.org/abs/2006.09359) | advantage-weighted regression to data | same objective offline and online | implicit constraint can stay too tight |
+| CQL [[5]](https://proceedings.neurips.cc/paper/2020/hash/0d2b2061826a5df3221116a5085a6052-Abstract.html) | push down unsupported action values | often needs recalibration | value scale drifts off the return scale |
+| IQL [[6]](https://openreview.net/forum?id=68n2s9ZJWF8) | in-sample expectile backup | relax expectile / AWR temperature | never learns about better OOD actions |
+| Cal-QL [[7]](https://proceedings.neurips.cc/paper_files/paper/2023/hash/c44a04289beaf0a7d968a94066a1d696-Abstract-Conference.html) | CQL floored at a reference $V^\mu$ | calibrated scale enables fast gains | needs a usable reference value |
+| RLPD [[8]](https://proceedings.mlr.press/v202/ball23a.html) | none; 50/50 replay + ensembles | it *is* the online phase | discards the pretrained policy |
+| PEX [[9]](https://openreview.net/forum?id=-Y34L45JR6z) | freeze $\pi_0$ as one candidate | train a separate online policy | more policies to train and arbitrate |
+
+---
+
+## How a good policy collapses online
+
+"Collapse" should mean a substantial early loss of return relative to the deployed
+offline policy, not any disappointing curve. Several distinct mechanisms produce it.
+
+**Optimistic bootstrap collapse.** A deterministic actor trained by
+$\max_\phi \mathbb{E}_s[\widehat{Q}_t(s, \pi_\phi(s))]$ actively *searches* for positive
+critic errors $\delta_t(s,a) = \widehat{Q}_t - Q^{\pi_t} > 0$ on unsupported actions.
+Once selected, the action shifts the state distribution and seeds replay; if the critic
+updates too slowly, the error persists long enough to destroy the initial behavior.
+Balanced replay with a pessimistic Q-ensemble protects this phase [[10]](https://proceedings.mlr.press/v164/lee22d.html).
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/offline-to-online-rl/fig3_optimistic_bootstrap.svg" alt="Critic value versus action: the learned critic matches the true value on the data support but rises to a spurious peak off support, where the actor's argmax lands" />
+  <figcaption>Optimistic bootstrap collapse. On the data support the learned critic $\widehat{Q}$ tracks the true value $Q^\pi$, but off support it is unconstrained and can rise to a spurious peak. A deterministic actor maximizing $\widehat{Q}$ is pulled to that off-support overestimate rather than the true optimum. Illustrative.</figcaption>
+</figure>
+
+**Pessimistic unlearning, where the scale is wrong even when the sign is safe.** A
+critic can avoid overestimation and still be a bad initialization. If the true value of
+the offline policy is $V^\mu(s) = 100$ but the conservative critic scores its action at
+10, then an exploratory online action with a temporary estimate of 15 looks
+preferable, and the actor unlearns a strong policy. Cal-QL [[7]](https://proceedings.neurips.cc/paper_files/paper/2023/hash/c44a04289beaf0a7d968a94066a1d696-Abstract-Conference.html) fixes this by flooring the penalized value at a reference scale, replacing $Q(s,a)$ in the conservative term with $\max\{Q(s,a), V^\mu(s)\}$.
+
+<div className="callout callout-intuition">
+<span className="callout-label">Intuition</span>
+
+Pessimism and calibration answer different questions, and offline RL only ever needed the first one.
+
+Pessimism asks whether unsupported actions are *overvalued*, a safety property, and a uniformly low
+critic satisfies it trivially. Calibration asks whether the critic is on a useful *scale* for
+comparing old behavior against new. Offline, nothing depends on the answer: you are ranking actions
+within one distribution, and a monotone squashing of every value changes no decision. The moment
+fine-tuning starts, every update is a comparison *across* distributions (the policy you have against
+the action you just tried), and a critic that scores a good action at 10 when it is worth 100 will
+trade it away for the first exploratory action that happens to score 15.
+
+</div>
+
+<figure>
+  <img loading="lazy" decoding="async" src="/blog/assets/offline-to-online-rl/fig4_calibration.svg" alt="Two-panel bar chart: uncalibrated pessimism scores the offline action below an exploratory action so the actor switches and unlearns; Cal-QL floors the offline value at the reference so the actor keeps it" />
+  <figcaption>Why calibration matters. Left: a conservative critic scores the offline action ($\widehat{Q}=10$) below a temporary exploratory estimate (15), even though the offline action is truly worth $V^\mu=100$, so the actor switches and unlearns. Right: Cal-QL floors the penalized value at $V^\mu$, restoring the ordering so the actor keeps the good policy. Illustrative.</figcaption>
+</figure>
+
+**Actor-critic misalignment.** A behavior-regularized actor can be good while the
+critic is inaccurate just outside the actor's support; maximizing that critic replaces
+a strong actor with one optimized against the critic's weakest region. Methods here
+realign or reconstruct the critic before aggressive updates, and some work questions whether
+the offline critic is a useful initialization at all. "Warm start"
+is overloaded: actor, critic, target networks, optimizer state, replay buffer, and
+normalization are separate transfer decisions.
+
+**Replay shock.** Switching from a large diverse offline distribution to a tiny online
+buffer from one policy causes forgetting and unstable targets; uniformly keeping all
+offline data makes online evidence a negligible fraction of each update. The principle
+is not "always retain the dataset" but *avoid an abrupt unsupported change in the
+critic's training distribution*, whether via density-ratio replay, a fixed mixture, or
+a warmup buffer [[11]](https://openreview.net/forum?id=HN0CYZbAPw).
+
+<div className="callout callout-warn">
+<span className="callout-label">Watch out</span>
+
+**Excessive conservatism** is the quiet failure, and it is the one your dashboards will not flag. A
+large cloning coefficient or a permanently pessimistic critic preserves $J(\pi_0)$ perfectly: no
+collapse, no divergence, a flat and reassuring curve. This is a stability–plasticity dilemma
+[[12]](https://proceedings.mlr.press/v235/hu24p.html), and the right balance depends on whether the
+dataset contains behavior better than the policy already captures.
+
+Because the four other mechanisms all announce themselves as a return drop, tuning to avoid *them*
+drifts you here by default. A run that never dips and never improves has not succeeded at the
+transition; it has declined to attempt it.
+
+</div>
+
+The five mechanisms are distinct failures with distinct fixes, not one problem:
+
+| Mechanism | Trigger | Symptom | Remedy |
+| --- | --- | --- | --- |
+| Optimistic bootstrap collapse | actor maximizes critic error on OOD actions | sharp early return drop | balanced replay + pessimistic ensemble [[10]](https://proceedings.mlr.press/v164/lee22d.html) |
+| Pessimistic unlearning | critic scale below true returns | good actions score worse than exploratory ones | calibrate to a reference value [[7]](https://proceedings.neurips.cc/paper_files/paper/2023/hash/c44a04289beaf0a7d968a94066a1d696-Abstract-Conference.html) |
+| Actor-critic misalignment | critic wrong just outside actor support | strong actor traded for critic's weak region | realign or reinit the critic first |
+| Replay shock | abrupt switch to a tiny online buffer | forgetting, unstable targets | control the replay mixture [[11]](https://openreview.net/forum?id=HN0CYZbAPw) |
+| Excessive conservatism | large BC weight / permanent pessimism | flat curve, no improvement | adaptive, evidence-tied conservatism [[12]](https://proceedings.mlr.press/v235/hu24p.html) |
+
+---
+
+## Design principles for a stable transition
+
+Those five failures have far fewer remedies than the literature has algorithms; the methods above
+reduce to four design levers.
+
+1. **Control the replay distribution, not just the buffer size.** A fixed 50/50 split
+   (as in strong online with offline data baselines like RLPD [[8]](https://proceedings.mlr.press/v202/ball23a.html)) is a useful baseline, not a universal answer. Treat $\eta_t$ as a control variable: too small dilutes online evidence, too large unanchors the critic.
+2. **Transfer the critic selectively.** Before fine-tuning, check three properties:
+   scale (are predicted returns comparable to Monte Carlo returns from $\pi_0$?),
+   ranking (does it prefer the offline action to worse local perturbations?), and off-support
+   uncertainty (does disagreement rise off the data manifold?).
+3. **Protect the initial actor without freezing it.** A trust region
+   $\max_\pi J(\pi)$ s.t. $\mathbb{E}[D_\text{KL}(\pi \| \pi_0)] \le \epsilon_t$ with a
+   *growing* radius $\epsilon_t$ avoids both a destroyed policy and a permanent ceiling;
+   Policy Expansion [[9]](https://openreview.net/forum?id=-Y34L45JR6z) instead keeps $\pi_0$ as one candidate and trains a separate online policy.
+4. **Make conservatism local and adaptive.** A single global penalty treats a well
+   covered action and a novel one identically; the ideal penalty is state-action
+   dependent, $\alpha_t(s,a) \propto$ epistemic uncertainty at $(s,a)$, decaying as
+   observations accumulate.
+---
+
+## When pretraining actually helps
+
+Offline-to-online is not always the right frame. Three regimes call for three different
+choices, and the honest question before any fine-tuning run is which one you are in.
+
+**Reach for offline-to-online fine-tuning** when the dataset contains genuinely useful
+behavior the policy should inherit, the online budget is small, and safety during early
+interaction matters. Here the pretrained policy is an asset: it starts near competence
+and the online phase only has to refine and extend it. This is where a growing trust
+region and a calibrated critic pay off, and where destroying $\pi_0$ in the first
+thousand steps is the failure to avoid.
+
+**Prefer online RL with offline data (RLPD-style)** when the dataset is broad but not
+expert, or when a fine-tuning method cannot beat a fresh learner given the same data.
+Symmetric replay, normalization, and large critic ensembles let a from-scratch agent
+exploit the dataset as replay without ever committing to a pretrained policy,
+sidestepping calibration and collapse entirely. The honest baseline for any fine-tuning
+method is RLPD from scratch on the same data; if pretraining does not win, its added
+complexity is unjustified.
+
+**Consider a sequence model** such as Online Decision Transformer
+[[13]](https://arxiv.org/abs/2202.05607) when a return-conditioned model already fits the offline
+data well and you want online improvement without a bootstrapped critic to miscalibrate. Trading the
+value function for autoregressive return conditioning removes the optimistic-bootstrap failure mode
+outright, because nothing in the objective maximizes a learned value, at the cost of the sample
+efficiency a good critic provides.
+
+The decision hinges on three quantities, and they are all knowable before the first online step:
+
+| | Data quality | Online budget | Offline critic | Failure to avoid |
+|:---|:---|:---|:---|:---|
+| **Fine-tune $\pi_0$** | good, worth inheriting | small | passes scale + ranking | destroying $\pi_0$ early |
+| **Online RL + offline data** | broad, not expert | large | unusable or absent | paying for pretraining that never won |
+| **Sequence model** | fits a return-conditioned model | moderate | not used | slower learning, no critic to exploit |
+
+Pretraining helps most when the data is good, the budget is small, and the critic survives the
+scale-and-ranking checks above. When it does not, a from-scratch learner with the dataset as replay
+is the baseline to beat, not an afterthought.
+
+---
+
+## What an empirical study should measure
+
+Make the transition visible rather than report only final score.
+
+- **Learning curves from online step zero**, including the pretrained policy's score,
+  with collapse depth, recovery time, and a fine evaluation cadence near the transition
+  (a short severe dip is easy to miss).
+- **Critic diagnostics.** Track $Q(s, \pi_t(s))$ on offline vs recent online states,
+  compare to truncated Monte Carlo returns, and decompose total value error into
+  relative structure plus a scale/offset term to separate ranking from scale drift.
+- **Policy diagnostics.** Divergence from $\pi_0$ on *both* offline and online state
+  distributions; small divergence on offline states does not imply safe behavior in
+  newly visited ones.
+- **Baselines** that separate the value of the pretrained actor, the pretrained
+  critic, and the dataset: continue offline; switch to unconstrained online; a replay
+  balanced method; a warmup/critic reinit variant; RLPD from scratch with the same
+  data; and the frozen offline policy.
+
+---
+
+The transition is where the value of everything upstream is decided, so it is worth having a
+fixed procedure for it rather than a set of instincts.
+
+<div className="callout callout-recipe">
+<span className="callout-label">The recipe</span>
+
+1. **Measure $J(\pi_0)$ first, and evaluate densely across the handoff.** Without the deployed
+   policy's score on the same axis, collapse depth and recovery time are unrecoverable after the fact
+   and a short severe dip is easy to miss at a coarse cadence.
+2. **Audit the critic before you transfer it.** Three checks: is its scale comparable to Monte Carlo
+   returns from $\pi_0$; does it rank the offline action above local perturbations; does ensemble
+   disagreement rise off the data manifold? Failing the first two, reinitialize it; actor, critic,
+   targets, optimizer state and buffer are separate transfer decisions.
+3. **Treat the replay fraction $\eta_t$ as a control variable.** 50/50 is a baseline, not an answer:
+   too small makes online evidence a rounding error in each update, too large unanchors the critic.
+4. **Give the actor a growing trust region, not a fixed leash.** Constrain
+   $\mathbb{E}[D_\text{KL}(\pi \| \pi_0)] \le \epsilon_t$ and expand $\epsilon_t$ as coverage earns
+   it. This is the lever that separates "protected" from "frozen".
+5. **Tie conservatism to local evidence, not to training phase.** An online sample can be
+   in-distribution; an offline sample can be irrelevant to the current policy. Penalties should decay
+   per state-action as observations accumulate there.
+6. **Race it against RLPD from scratch on the same data.** If the from-scratch learner matches your
+   pipeline, the pretrained policy was never the asset, and every mechanism above is complexity you
+   can delete.
+
+</div>
+
+---
+
+## References
+
+<ol className="references">
+  <li>Chen &amp; Jiang. <a href="https://arxiv.org/abs/1905.00360" target="_blank" rel="noreferrer">"Information-Theoretic Considerations in Batch Reinforcement Learning."</a> <em>ICML</em>, 2019.</li>
+  <li>Fujimoto et al. <a href="https://proceedings.mlr.press/v97/fujimoto19a.html" target="_blank" rel="noreferrer">"Off-Policy Deep RL without Exploration."</a> <em>BCQ (ICML)</em>, 2019.</li>
+  <li>Fujimoto & Gu. <a href="https://proceedings.neurips.cc/paper/2021/hash/a8166da05c5a094f7dc03724b41886e5-Abstract.html" target="_blank" rel="noreferrer">"A Minimalist Approach to Offline RL."</a> <em>TD3+BC (NeurIPS)</em>, 2021.</li>
+  <li>Nair et al. <a href="https://arxiv.org/abs/2006.09359" target="_blank" rel="noreferrer">"AWAC: Accelerating Online RL with Offline Datasets."</a> 2020.</li>
+  <li>Kumar et al. <a href="https://proceedings.neurips.cc/paper/2020/hash/0d2b2061826a5df3221116a5085a6052-Abstract.html" target="_blank" rel="noreferrer">"Conservative Q-Learning for Offline Reinforcement Learning."</a> <em>CQL (NeurIPS)</em>, 2020.</li>
+  <li>Kostrikov et al. <a href="https://openreview.net/forum?id=68n2s9ZJWF8" target="_blank" rel="noreferrer">"Offline RL with Implicit Q-Learning."</a> <em>IQL (ICLR)</em>, 2022.</li>
+  <li>Nakamoto et al. <a href="https://proceedings.neurips.cc/paper_files/paper/2023/hash/c44a04289beaf0a7d968a94066a1d696-Abstract-Conference.html" target="_blank" rel="noreferrer">"Cal-QL: Calibrated Offline RL Pre-Training for Efficient Online Fine-Tuning."</a> <em>NeurIPS</em>, 2023.</li>
+  <li>Ball et al. <a href="https://proceedings.mlr.press/v202/ball23a.html" target="_blank" rel="noreferrer">"Efficient Online Reinforcement Learning with Offline Data."</a> <em>RLPD (ICML)</em>, 2023.</li>
+  <li>Zhang et al. <a href="https://openreview.net/forum?id=-Y34L45JR6z" target="_blank" rel="noreferrer">"Policy Expansion for Bridging Offline-to-Online RL."</a> <em>PEX (ICLR)</em>, 2023.</li>
+  <li>Lee et al. <a href="https://proceedings.mlr.press/v164/lee22d.html" target="_blank" rel="noreferrer">"Offline-to-Online RL via Balanced Replay and Pessimistic Q-Ensemble."</a> <em>CoRL</em>, 2022.</li>
+  <li>Zhou et al. <a href="https://openreview.net/forum?id=HN0CYZbAPw" target="_blank" rel="noreferrer">"Efficient Online RL Fine-Tuning Need Not Retain Offline Data."</a> <em>ICLR</em>, 2025.</li>
+  <li>Hu et al. <a href="https://proceedings.mlr.press/v235/hu24p.html" target="_blank" rel="noreferrer">"Bayesian Design Principles for Offline-to-Online RL."</a> <em>ICML</em>, 2024.</li>
+  <li>Zheng et al. <a href="https://arxiv.org/abs/2202.05607" target="_blank" rel="noreferrer">"Online Decision Transformer."</a> <em>ICML</em>, 2022.</li>
+</ol>
+
+</div>
+
+</div>

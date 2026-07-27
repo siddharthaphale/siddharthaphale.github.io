@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 640" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#52514E"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="800" height="640" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="400" y="66" text-anchor="middle" font-size="50" font-weight="bold" fill="#1a1a1a">Compile, don&#8217;t reflect</text>
+
+  <!-- box 1: failed program -->
+  <rect x="250" y="104" width="300" height="62" rx="10" fill="#F5F5F2" stroke="#C3C2B7" stroke-width="1.5"/>
+  <text x="400" y="146" text-anchor="middle" font-size="32" fill="#0B0B0B">failed program</text>
+
+  <!-- arrow 1 -->
+  <line x1="400" y1="166" x2="400" y2="220" stroke="#52514E" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="418" y="202" font-size="27" font-style="italic" fill="#52514E">compile</text>
+
+  <!-- box 2: constraints -->
+  <rect x="110" y="228" width="580" height="122" rx="10" fill="#E5EFFB" stroke="#7DB0DE" stroke-width="2.5"/>
+  <text x="400" y="278" text-anchor="middle" font-size="33" font-weight="bold" fill="#1d4568" font-family="ui-monospace, Menlo, monospace">MUST grasp before lifting</text>
+  <text x="400" y="322" text-anchor="middle" font-size="33" font-weight="bold" fill="#1d4568" font-family="ui-monospace, Menlo, monospace">NEVER release after lift</text>
+
+  <!-- arrow 2 -->
+  <line x1="400" y1="350" x2="400" y2="404" stroke="#52514E" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- box 3: fresh program -->
+  <rect x="200" y="412" width="400" height="94" rx="10" fill="#ffffff" stroke="#C3C2B7" stroke-width="1.5"/>
+  <text x="400" y="454" text-anchor="middle" font-size="34" font-weight="bold" fill="#0B0B0B">fresh program</text>
+  <text x="400" y="490" text-anchor="middle" font-size="24" fill="#52514E">previous code never shown</text>
+
+  <!-- loop arrow: box3 left -> up -> box1 left -->
+  <path d="M 200 459 L 96 459 L 96 135 L 242 135" fill="none" stroke="#52514E" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="60" y="290" text-anchor="middle" font-size="34" font-weight="bold" fill="#0B0B0B">&#215;5</text>
+
+  <!-- footer contrast -->
+  <circle cx="164" cy="576" r="9" fill="#F2A585"/>
+  <text x="186" y="586" font-size="27" font-style="italic" fill="#a85a38">self-reflection? lands below resampling</text>
+</svg>
